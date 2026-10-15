@@ -68,6 +68,16 @@ int wa_client_send_iq(wa_client *c, wa_node *iq, char *id_out, size_t id_cap);
 // A unique stanza id in WhatsApp's shape.
 void wa_client_next_id(wa_client *c, char *out, size_t cap);
 
+// An action posted from another thread, run on the client thread between polls (see wa_client_post).
+typedef void (*wa_client_action)(wa_client *c, void *ctx);
+// Enqueue an action to run on the client thread. Thread-safe. 0 or -1 (queue full).
+int wa_client_post(wa_client *c, wa_client_action fn, void *ctx);
+// Send an <iq> and block (pumping the socket) until the matching <iq result/error> arrives. CLIENT THREAD ONLY
+// (call it from inside a posted action, never from another thread). Returns the result node (caller frees) or NULL.
+wa_node *wa_client_request_sync(wa_client *c, wa_node *iq, int timeout_ms);
+// The device identity (for the orchestration layer's key material).
+wa_device *wa_client_device(wa_client *c);
+
 #ifdef __cplusplus
 }
 #endif

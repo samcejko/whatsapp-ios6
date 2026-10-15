@@ -9,6 +9,12 @@
 #include <string.h>
 #include <stdarg.h>
 #include <zlib.h>
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
+#define WA_MAX_PENDING 8
+#define WA_MAX_ACTIONS 32
 
 #define KEEPALIVE_MS 25000
 #define QR_ROTATE_MS 20000
@@ -32,7 +38,35 @@ struct wa_client {
     uint64_t last_send_us;
     uint32_t id_counter;
     char error[192];
+
+    // IQ request/response correlation (used by wa_client_request_sync on the client thread)
+    struct { char id[24]; wa_node *result; int done; int used; } pending[WA_MAX_PENDING];
+    // actions posted from other threads, drained and run on the client thread
+    struct { wa_client_action fn; void *ctx; } actions[WA_MAX_ACTIONS];
+    int action_head, action_tail;
+#ifndef _WIN32
+    pthread_mutex_t lock;
+    int lock_ready;
+#endif
 };
+
+static void wc_lock(wa_client *c)
+{
+#ifndef _WIN32
+    if (c->lock_ready) pthread_mutex_lock(&c->lock);
+#else
+    (void)c;
+#endif
+}
+
+static void wc_unlock(wa_client *c)
+{
+#ifndef _WIN32
+    if (c->lock_ready) pthread_mutex_unlock(&c->lock);
+#else
+    (void)c;
+#endif
+}
 
 static void set_err(wa_client *c, const char *fmt, ...)
 {
@@ -53,6 +87,9 @@ wa_client *wa_client_new(wa_device *device, const wa_client_callbacks *cb, const
     if (!c->cfg.path) c->cfg.path = "/ws/chat";
     if (!c->cfg.origin) c->cfg.origin = "https://web.whatsapp.com";
     wa_buf_init(&c->inbuf);
+#ifndef _WIN32
+    if (pthread_mutex_init(&c->lock, NULL) == 0) c->lock_ready = 1;
+#endif
     return c;
 }
 
@@ -61,10 +98,16 @@ void wa_client_free(wa_client *c)
     if (!c) return;
     if (c->ws) wa_ws_close(c->ws);
     wa_buf_free(&c->inbuf);
+    for (int i = 0; i < WA_MAX_PENDING; i++) if (c->pending[i].result) wa_node_free(c->pending[i].result);
+#ifndef _WIN32
+    if (c->lock_ready) pthread_mutex_destroy(&c->lock);
+#endif
     free(c);
 }
 
 wa_client_state wa_client_get_state(const wa_client *c) { return c ? c->state : WA_DISCONNECTED; }
+
+wa_device *wa_client_device(wa_client *c) { return c ? c->dev : NULL; }
 
 void wa_client_stop(wa_client *c) { if (c) c->stop = 1; }
 
@@ -289,6 +332,27 @@ static void handle_pair_success(wa_client *c, const wa_node *iq, const wa_node *
     c->reconnect_wanted = 1;   // the server sends a 515 next; reconnect with the login payload
 }
 
+// If node is an <iq> result/error whose id a request_sync is waiting on, stash a clone for it. Returns 1 if taken.
+static int take_pending_iq(wa_client *c, const wa_node *node)
+{
+    if (!wa_node_tag_is(node, "iq")) return 0;
+    const char *type = wa_node_get(node, "type");
+    const char *id = wa_node_get(node, "id");
+    if (!id || !type || (strcmp(type, "result") != 0 && strcmp(type, "error") != 0)) return 0;
+    int taken = 0;
+    wc_lock(c);
+    for (int i = 0; i < WA_MAX_PENDING; i++) {
+        if (c->pending[i].used && !c->pending[i].done && strcmp(c->pending[i].id, id) == 0) {
+            c->pending[i].result = wa_node_clone(node);
+            c->pending[i].done = 1;
+            taken = 1;
+            break;
+        }
+    }
+    wc_unlock(c);
+    return taken;
+}
+
 static void dispatch(wa_client *c, const wa_node *node)
 {
     if (wa_node_tag_is(node, "iq")) {
@@ -296,6 +360,7 @@ static void dispatch(wa_client *c, const wa_node *node)
         wa_node *ps = wa_node_child(node, "pair-success");
         if (pd) { handle_pair_device(c, node, pd); return; }
         if (ps) { handle_pair_success(c, node, ps); return; }
+        if (take_pending_iq(c, node)) return;
     } else if (wa_node_tag_is(node, "success")) {
         c->state = WA_CONNECTED;
         const char *pn = wa_node_get(node, "lid");
@@ -388,9 +453,76 @@ static void send_keepalive(wa_client *c)
     wa_node_free(iq);
 }
 
+// Drain actions posted from other threads and run them on the client thread.
+static void drain_actions(wa_client *c)
+{
+    for (;;) {
+        wa_client_action fn = NULL;
+        void *ctx = NULL;
+        wc_lock(c);
+        if (c->action_head != c->action_tail) {
+            fn = c->actions[c->action_head].fn;
+            ctx = c->actions[c->action_head].ctx;
+            c->action_head = (c->action_head + 1) % WA_MAX_ACTIONS;
+        }
+        wc_unlock(c);
+        if (!fn) break;
+        fn(c, ctx);
+    }
+}
+
+int wa_client_post(wa_client *c, wa_client_action fn, void *ctx)
+{
+    int rc = -1;
+    wc_lock(c);
+    int next = (c->action_tail + 1) % WA_MAX_ACTIONS;
+    if (next != c->action_head) { c->actions[c->action_tail].fn = fn; c->actions[c->action_tail].ctx = ctx; c->action_tail = next; rc = 0; }
+    wc_unlock(c);
+    return rc;
+}
+
+// Send an <iq> (assigns an id) and pump the socket until the matching result/error arrives. Client thread only.
+wa_node *wa_client_request_sync(wa_client *c, wa_node *iq, int timeout_ms)
+{
+    if (c->state < WA_HANDSHAKING || !c->ws) return NULL;
+    char id[24];
+    const char *existing = wa_node_get(iq, "id");
+    if (existing) snprintf(id, sizeof id, "%s", existing);
+    else { wa_client_next_id(c, id, sizeof id); wa_node_attr(iq, "id", id); }
+
+    int slot = -1;
+    wc_lock(c);
+    for (int i = 0; i < WA_MAX_PENDING; i++) if (!c->pending[i].used) { slot = i; break; }
+    if (slot >= 0) { c->pending[slot].used = 1; c->pending[slot].done = 0; c->pending[slot].result = NULL; snprintf(c->pending[slot].id, sizeof c->pending[slot].id, "%s", id); }
+    wc_unlock(c);
+    if (slot < 0) return NULL;
+
+    if (wa_client_send(c, iq) != 0) { wc_lock(c); c->pending[slot].used = 0; wc_unlock(c); return NULL; }
+
+    uint64_t deadline = wa_now_us() + (uint64_t)timeout_ms * 1000;
+    wa_node *result = NULL;
+    while (wa_now_us() < deadline) {
+        int done;
+        wc_lock(c);
+        done = c->pending[slot].done;
+        if (done) { result = c->pending[slot].result; c->pending[slot].result = NULL; c->pending[slot].used = 0; }
+        wc_unlock(c);
+        if (done) break;
+        int r = wa_ws_read(c->ws, &c->inbuf, 200);
+        if (r < 0) break;
+        if (r > 0 && process_frames(c) != 0) break;
+    }
+    wc_lock(c);
+    c->pending[slot].used = 0;
+    wc_unlock(c);
+    return result;
+}
+
 wa_client_state wa_client_poll(wa_client *c, int timeout_ms)
 {
     if (!c->ws || c->state == WA_DISCONNECTED) return WA_DISCONNECTED;
+    drain_actions(c);
+    if (c->reconnect_wanted) return WA_DISCONNECTED;
     int r = wa_ws_read(c->ws, &c->inbuf, timeout_ms);
     if (r < 0) {
         set_err(c, "%s", wa_ws_error(c->ws));
