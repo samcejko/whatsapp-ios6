@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define WA_SESS_MAX 256
+#define WA_SESS_MAX 64
 
 typedef struct {
     char jid[80];

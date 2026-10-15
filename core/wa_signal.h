@@ -28,7 +28,7 @@ typedef struct {
 } wa_sig_bundle;
 
 #define WA_SIG_MAX_RECV_CHAINS 5
-#define WA_SIG_MAX_SKIPPED 320
+#define WA_SIG_MAX_SKIPPED 48
 
 typedef struct { uint8_t ratchet[32]; uint32_t counter; uint8_t cipher[32], mac[32], iv[16]; } wa_sig_skipped;
 typedef struct { uint8_t ratchet[32], chain[32]; uint32_t index; int used; } wa_sig_recv_chain;

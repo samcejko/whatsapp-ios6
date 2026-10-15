@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define SESS_MAGIC 0x57533153u   // "WS1S"
 
@@ -76,8 +77,10 @@ int wa_sess_load(wa_sess_store *s, const char *path)
 
 int wa_sessions_selftest(void)
 {
-    wa_sess_store s;
-    wa_sess_init(&s);
+    wa_sess_store *store = (wa_sess_store *)malloc(sizeof *store);   // ~hundreds of KB: too big for the stack
+    if (!store) return -1;
+    wa_sess_store *s = store;
+    wa_sess_init(s);
     wa_sig_session a, b;
     memset(&a, 0, sizeof a);
     memset(&b, 0, sizeof b);
@@ -86,23 +89,25 @@ int wa_sessions_selftest(void)
     memset(a.root, 0xAB, 32);
     b.established = 1;
     b.send_index = 9;
-    wa_sess_put(&s, "1:0@s.whatsapp.net", &a);
-    wa_sess_put(&s, "1:1@s.whatsapp.net", &b);
-    int ok = s.count == 2 && wa_sess_has(&s, "1:0@s.whatsapp.net") &&
-             wa_sess_get(&s, "1:1@s.whatsapp.net")->send_index == 9 && !wa_sess_has(&s, "2:0@s.whatsapp.net");
+    wa_sess_put(s, "1:0@s.whatsapp.net", &a);
+    wa_sess_put(s, "1:1@s.whatsapp.net", &b);
+    int ok = s->count == 2 && wa_sess_has(s, "1:0@s.whatsapp.net") &&
+             wa_sess_get(s, "1:1@s.whatsapp.net")->send_index == 9 && !wa_sess_has(s, "2:0@s.whatsapp.net");
     // replace
     a.send_index = 7;
-    wa_sess_put(&s, "1:0@s.whatsapp.net", &a);
-    ok = ok && s.count == 2 && wa_sess_get(&s, "1:0@s.whatsapp.net")->send_index == 7;
+    wa_sess_put(s, "1:0@s.whatsapp.net", &a);
+    ok = ok && s->count == 2 && wa_sess_get(s, "1:0@s.whatsapp.net")->send_index == 7;
     char tmp[L_tmpnam + 8];
     if (ok && tmpnam(tmp)) {
-        wa_sess_store s2;
-        ok = wa_sess_save(&s, tmp) == 0 && wa_sess_load(&s2, tmp) == 0 && s2.count == 2 &&
-             wa_sess_get(&s2, "1:0@s.whatsapp.net")->send_index == 7 &&
-             wa_sess_get(&s2, "1:1@s.whatsapp.net")->send_index == 9 &&
-             memcmp(wa_sess_get(&s2, "1:0@s.whatsapp.net")->root, a.root, 32) == 0;
+        wa_sess_store *s2 = (wa_sess_store *)malloc(sizeof *s2);
+        ok = s2 && wa_sess_save(s, tmp) == 0 && wa_sess_load(s2, tmp) == 0 && s2->count == 2 &&
+             wa_sess_get(s2, "1:0@s.whatsapp.net")->send_index == 7 &&
+             wa_sess_get(s2, "1:1@s.whatsapp.net")->send_index == 9 &&
+             memcmp(wa_sess_get(s2, "1:0@s.whatsapp.net")->root, a.root, 32) == 0;
         remove(tmp);
+        free(s2);
     }
+    free(store);
     if (!ok) { wa_log("sessions selftest failed"); return -1; }
     return 0;
 }
