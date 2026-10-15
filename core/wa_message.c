@@ -68,6 +68,29 @@ wa_node *wa_msg_build_node(const char *to, const char *id, const uint8_t *enc, s
     return m;
 }
 
+wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_devenc *devs, int ndevs,
+                         const uint8_t *device_identity, size_t di_len)
+{
+    wa_node *m = wa_node_new("message");
+    wa_node_attr(m, "to", to_user);
+    wa_node_attr(m, "id", id);
+    wa_node_attr(m, "type", "text");
+    wa_node *parts = wa_node_add_new(m, "participants");
+    int any_pkmsg = 0;
+    for (int i = 0; i < ndevs; i++) {
+        wa_node *to = wa_node_add_new(parts, "to");
+        wa_node_attr(to, "jid", devs[i].jid);
+        wa_node *e = wa_node_add_new(to, "enc");
+        wa_node_attr(e, "v", "2");
+        wa_node_attr(e, "type", devs[i].enc_type);
+        wa_node_attr(e, "count", "0");
+        wa_node_set_bytes(e, devs[i].enc, devs[i].enc_len);
+        if (strcmp(devs[i].enc_type, "pkmsg") == 0) any_pkmsg = 1;
+    }
+    if (any_pkmsg && device_identity && di_len) wa_node_set_bytes(wa_node_add_new(m, "device-identity"), device_identity, di_len);
+    return m;
+}
+
 int wa_msg_parse_incoming(const wa_node *message, wa_msg_incoming *out)
 {
     if (!wa_node_tag_is(message, "message")) return 0;
@@ -163,5 +186,30 @@ int wa_message_selftest(void)
     wa_buf_free(&cenc);
     wa_buf_free(&cmsg);
     if (!ok) { wa_log("message selftest: call-key round trip failed"); return -1; }
+
+    // --- DM fanout node (two devices, one pkmsg -> device-identity attached) ---
+    uint8_t ct0[20], ct1[22], di[64];
+    for (int i = 0; i < 20; i++) ct0[i] = (uint8_t)i;
+    for (int i = 0; i < 22; i++) ct1[i] = (uint8_t)(i + 5);
+    for (int i = 0; i < 64; i++) di[i] = (uint8_t)(i + 1);
+    wa_msg_devenc devs[2] = {
+        { "420777123456:0@s.whatsapp.net", ct0, sizeof ct0, "pkmsg" },
+        { "420777123456:1@s.whatsapp.net", ct1, sizeof ct1, "msg" },
+    };
+    wa_node *dm = wa_msg_build_dm("420777123456@s.whatsapp.net", "MID1", devs, 2, di, sizeof di);
+    wa_buf db;
+    wa_buf_init(&db);
+    ok = wa_node_encode(dm, &db) == 0;
+    wa_node *dmb = ok ? wa_node_decode(db.data + 1, db.len - 1) : NULL;
+    if (dmb) {
+        wa_node *parts = wa_node_child(dmb, "participants");
+        wa_node *di_node = wa_node_child(dmb, "device-identity");
+        ok = parts && parts->nchildren == 2 && di_node && di_node->content_len == 64 &&
+             wa_node_find(parts, "enc") != NULL;
+    } else ok = 0;
+    wa_node_free(dm);
+    wa_node_free(dmb);
+    wa_buf_free(&db);
+    if (!ok) { wa_log("message selftest: DM fanout failed"); return -1; }
     return 0;
 }

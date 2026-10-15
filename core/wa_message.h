@@ -32,6 +32,13 @@ char *wa_msg_parse_text(const uint8_t *message, size_t len);
 // Build a <message to=.. id=.. type=text><enc v=2 type=.. count=0>enc</enc></message> node (caller frees).
 wa_node *wa_msg_build_node(const char *to, const char *id, const uint8_t *enc, size_t enc_len, const char *enc_type);
 
+// One recipient/own device's ciphertext in a fanned-out DM.
+typedef struct { const char *jid; const uint8_t *enc; size_t enc_len; const char *enc_type; } wa_msg_devenc;
+// Build a fanned-out 1:1 message: <message to=user id type=text><participants><to jid><enc/></to>...</participants>
+// [<device-identity>]. device_identity (from our pairing) is included when any enc is a pkmsg. Caller frees.
+wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_devenc *devs, int ndevs,
+                         const uint8_t *device_identity, size_t di_len);
+
 // Parse an incoming <message>: its from/id/type and the first <enc> (type + bytes). Returns 1 on success.
 typedef struct {
     const char *from, *id, *type;

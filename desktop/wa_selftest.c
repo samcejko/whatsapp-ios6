@@ -15,6 +15,8 @@
 #include "wa_relay.h"
 #include "wa_signal.h"
 #include "wa_message.h"
+#include "wa_user.h"
+#include "wa_sessions.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -93,7 +95,9 @@ int main(void)
     check("relay STUN (allocate/MI/fingerprint/ping/xor-endpoint)", wa_wstun_selftest() == 0);
     check("relay <relay> node parse (endpoints/tokens/hbh_key)", wa_relay_selftest() == 0);
     check("Signal session (X3DH + Double Ratchet, A<->B + out-of-order)", wa_signal_selftest() == 0);
-    check("messaging (text + call-key: Message proto, Signal enc, <message> node)", wa_message_selftest() == 0);
+    check("messaging (text + call-key + DM fanout node)", wa_message_selftest() == 0);
+    check("usync device list + prekey bundle parse", wa_user_selftest() == 0);
+    check("Signal session store (put/get/persist)", wa_sessions_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
