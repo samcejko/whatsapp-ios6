@@ -1,6 +1,7 @@
 #include "wa_store.h"
 #include "wa_crypto.h"
 #include "wa_proto.h"
+#include "wa_node.h"   /* wa_jid */
 
 #include <stdio.h>
 #include <stdlib.h>
