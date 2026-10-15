@@ -25,12 +25,18 @@
 - `wa_call` — 1:1 call signaling: builders for the `<call>` stanzas (offer / preaccept / accept / transport /
   terminate / reject / mute_v2 / relaylatency / heartbeat) with the load-bearing `<offer>` child order, plus
   offer parsing. Round-trip + child-order self-test.
+- `wa_wstun` — WhatsApp's STUN flavour for the relay handshake: ALLOCATE/BINDING with a RELAY-TOKEN,
+  MESSAGE-INTEGRITY (HMAC-SHA1), FINGERPRINT (CRC-32), the keepalive ping, the XOR relay endpoint and the native
+  sender-subscription attribute, plus parsing. **KAT-verified** (attr, MI+FP messages, ping, xor-endpoint match).
+- `wa_relay` — parses the `<relay>` node (te2 endpoints with ipv4/ipv6+port, indexed `<token>`/`<auth_token>`,
+  `<hbh_key>`, `<warp_mi_tag_len>`) and picks the media endpoint (FNA-first for an inbound call).
 - `desktop/` — an offline self-test harness (run in CI) and a development pairing CLI.
-- CI: compiles the core on Linux and runs the offline self-tests on every push (now 6 groups, all green).
+- CI: compiles the core on Linux and runs the offline self-tests on every push (now 8 groups, all green).
 
 ### Next
-- Wire the RTC stack to the WhatsApp relay (DTLS + SCTP data channel to the `<relay>` endpoint) and run WARP-framed
-  SRTP media; the crypto and signaling for it are in place.
+- Wire the RTC stack (`core/rtc/` gf_dtls/gf_sctp) to the WhatsApp relay: UDP → DTLS → SCTP → pre-negotiated
+  DataChannel (id 0, label "pre-negotiated"), STUN ALLOCATE with the relay token, then WARP-framed SRTP media.
+  The crypto, signaling, STUN and relay parsing for it are all in place and KAT-verified.
 - Per-device `<enc>` call-key encryption via Signal sessions (libsignal-protocol in C) — shared with messaging.
 - Audio (MLow decode + Opus, VoiceProcessingIO at 16 kHz) and the H.264 hardware-encode spike on the device.
 - The iOS 6 app UI (skeuomorphic; the call screen like the iOS 6 Phone/FaceTime screen).
