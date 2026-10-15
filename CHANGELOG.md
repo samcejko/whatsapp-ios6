@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — the app
+
+WhatsApp6 builds as an installable iOS app (armv7 for iOS 6, arm64 for iOS 14+) with the whole protocol stack and
+a skeuomorphic iOS 6 UI. CI compiles both architectures and runs the offline self-tests (10 groups, all green).
+
+### The app (Objective-C, Theos)
+- `WASession` — bridges the C core (`wa_client`) to the UI: owns the device identity, runs the connection on a
+  background thread, republishes QR / state / paired / node events as notifications.
+- Screens: pairing with a live QR (scan in WhatsApp → Linked devices), the chat list with a connection banner,
+  a chat view with glossy green/white speech bubbles and an input bar, and a Phone/FaceTime-style call screen
+  with round glossy controls. `WATheme` is the skeuomorphic iOS 6 look; strings in English + Czech.
+- `WAAudioEngine` — VoiceProcessingIO (echo cancellation) at 16 kHz with Opus encode/decode and a jitter buffer.
+- Theos build: one tree → armv7 (iOS 6, iOS 9.3 SDK) and arm64 (iOS 14+, iOS 16.5 SDK) packages; icon + launch
+  images from `tools/icon.svg`; VoIP background mode and mic/camera usage strings.
+
+### Live transport
+- `wa_rtc` — the call media transport: UDP → DTLS → SCTP → the pre-negotiated WebRTC data channel to a relay,
+  reusing the GFN6 `gf_dtls`/`gf_sctp` stack. (Exercised only against a real relay, not in CI.)
+- `wa_message` — the Message protobuf (text and the call-key wrapper), Signal encryption + WhatsApp padding, and
+  the `<message>`/`<enc>` stanza; end-to-end self-test (text + call key, A→B through the stanza).
+- `wa_signal` — the Signal protocol in C: X3DH session from a prekey bundle and the Double Ratchet
+  (SignalMessage / PreKeySignalMessage, skipped-key handling); A↔B + out-of-order self-test.
+
+### Known remaining work (device / network, deferred)
+- Live pairing with the user's number, and the message fanout (usync + prekey fetch) that fills the chat list.
+- The call engine orchestration (STUN allocate over `wa_rtc`, SRTP frames through the audio engine) end to end.
+- The MLow decoder (WhatsApp's default inbound audio codec); Opus send/receive is in place.
+
+## Earlier (protocol core)
 
 ### Added — protocol core (plain C, builds for iOS 6 armv7 / arm64 / desktop)
 - `wa_util` — byte buffers, base64/hex, time, CSPRNG, logging.
