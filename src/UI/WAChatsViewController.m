@@ -49,7 +49,22 @@
     [self.view addSubview:self.empty];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onState:) name:WASessionStateChanged object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
     [self refreshBanner:[WASession shared].state];
+}
+
+- (void)onMessage:(NSNotification *)n
+{
+    NSString *from = n.userInfo[@"from"] ?: @"";
+    NSString *text = n.userInfo[@"text"] ?: @"";
+    NSString *name = [from componentsSeparatedByString:@"@"].firstObject ?: from;
+    int found = -1;
+    for (NSUInteger i = 0; i < self.chats.count; i++) if ([self.chats[i][@"jid"] isEqualToString:from]) { found = (int)i; break; }
+    NSDictionary *row = @{ @"jid": from, @"name": name, @"last": text };
+    if (found >= 0) [self.chats replaceObjectAtIndex:found withObject:row];
+    else [self.chats insertObject:row atIndex:0];
+    self.empty.hidden = self.chats.count > 0;
+    [self.table reloadData];
 }
 
 - (void)viewDidLayoutSubviews

@@ -6,6 +6,7 @@ extern NSString *const WASessionStateChanged;   // userInfo: @"state" (NSNumber)
 extern NSString *const WASessionQRChanged;       // userInfo: @"qr" (NSString)
 extern NSString *const WASessionPaired;          // userInfo: @"jid"
 extern NSString *const WASessionNodeReceived;    // userInfo: @"xml" (NSString, debug render)
+extern NSString *const WASessionMessage;         // userInfo: @"from" (bare JID), @"text"
 
 typedef NS_ENUM(NSInteger, WASessionState) {
     WASessionStateDisconnected = 0,
@@ -27,5 +28,10 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 - (void)start;
 - (void)stop;
 - (void)unlinkAndReset;   // forget the device identity (local only) and re-pair
+
+// Send a 1:1 text to a bare user JID ("<num>@s.whatsapp.net"). Runs on the client thread.
+- (void)sendText:(NSString *)text toJID:(NSString *)jid;
+// Place a 1:1 call to a bare user JID. Sends the encrypted <offer>; the media comes up on the client thread.
+- (void)placeCallTo:(NSString *)jid video:(BOOL)video;
 
 @end

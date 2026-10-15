@@ -2,6 +2,7 @@
 #import "WACallViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
+#import "../WASession.h"
 
 @interface WAChatViewController ()
 @property (nonatomic, copy) NSString *jid;
@@ -71,6 +72,23 @@
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(kbShow:) name:UIKeyboardWillShowNotification object:nil];
     [nc addObserver:self selector:@selector(kbHide:) name:UIKeyboardWillHideNotification object:nil];
+    [nc addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
+}
+
+// match two JIDs by their user (digits before @ / :)
+static BOOL sameUser(NSString *a, NSString *b)
+{
+    NSString *ua = [[a componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
+    NSString *ub = [[b componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
+    return ua.length && [ua isEqualToString:ub];
+}
+
+- (void)onMessage:(NSNotification *)n
+{
+    if (!sameUser(n.userInfo[@"from"], self.jid)) return;
+    [self.messages addObject:@{ @"text": n.userInfo[@"text"] ?: @"", @"out": @NO }];
+    [self.table reloadData];
+    [self scrollToBottom];
 }
 
 - (void)viewDidLayoutSubviews
@@ -107,7 +125,7 @@
     self.field.text = @"";
     [self.table reloadData];
     [self scrollToBottom];
-    // Sending over the wire (Signal-encrypted <message>) is wired in the messaging core; this shows the local echo.
+    [[WASession shared] sendText:text toJID:self.jid];
     WALog(@"send to %@: %lu chars", self.jid, (unsigned long)text.length);
 }
 
@@ -120,6 +138,7 @@
 
 - (void)voiceCall
 {
+    [[WASession shared] placeCallTo:self.jid video:NO];
     WACallViewController *c = [[WACallViewController alloc] initWithName:self.title video:NO incoming:NO];
     c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     [self presentViewController:c animated:YES completion:nil];
@@ -127,6 +146,7 @@
 
 - (void)videoCall
 {
+    [[WASession shared] placeCallTo:self.jid video:YES];
     WACallViewController *c = [[WACallViewController alloc] initWithName:self.title video:YES incoming:NO];
     c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     [self presentViewController:c animated:YES completion:nil];
