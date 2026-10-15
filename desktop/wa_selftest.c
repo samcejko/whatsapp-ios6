@@ -12,6 +12,7 @@
 #include "wa_srtp.h"
 #include "wa_call.h"
 #include "wa_wstun.h"
+#include "wa_relay.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -88,6 +89,7 @@ int main(void)
     check("call SRTP (E2E keys, RTP IV, AES-CTR, WARP tag, ROC)", wa_srtp_selftest() == 0);
     check("call signaling stanzas (offer/accept/terminate)", wa_call_selftest() == 0);
     check("relay STUN (allocate/MI/fingerprint/ping/xor-endpoint)", wa_wstun_selftest() == 0);
+    check("relay <relay> node parse (endpoints/tokens/hbh_key)", wa_relay_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
