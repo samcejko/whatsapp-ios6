@@ -14,6 +14,7 @@ NSString *const WASessionNodeReceived = @"WASessionNodeReceived";
 NSString *const WASessionMessage = @"WASessionMessage";
 
 @interface WASession () {
+@public
     wa_device _dev;
     wa_client *_client;
     wa_client_callbacks _cb;
