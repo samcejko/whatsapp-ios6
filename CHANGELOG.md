@@ -23,10 +23,25 @@ a skeuomorphic iOS 6 UI. CI compiles both architectures and runs the offline sel
 - `wa_signal` — the Signal protocol in C: X3DH session from a prekey bundle and the Double Ratchet
   (SignalMessage / PreKeySignalMessage, skipped-key handling); A↔B + out-of-order self-test.
 
-### Known remaining work (device / network, deferred)
-- Live pairing with the user's number, and the message fanout (usync + prekey fetch) that fills the chat list.
-- The call engine orchestration (STUN allocate over `wa_rtc`, SRTP frames through the audio engine) end to end.
-- The MLow decoder (WhatsApp's default inbound audio codec); Opus send/receive is in place.
+### Messaging + calls wired end to end (in code)
+- Client IQ request/response correlation + an action queue (`wa_client_post` / `wa_client_request_sync`).
+- `wa_user` (usync device list + prekey fetch/parse), `wa_sessions` (persisted Signal session store), `wa_chat`
+  (resolve devices → establish sessions → encrypt per device → DM fanout send; incoming decrypt; call-key enc),
+  `wa_callengine` (place / accept / reject / terminate; incoming-offer call-key decrypt).
+- The app sends and receives real encrypted text; the chat list and chat view update; call buttons send a real
+  encrypted `<offer>`; the call screen opens the echo-cancelled 16 kHz Opus audio engine.
+
+### MLow (inbound codec) — foundation done, DSP staged
+- `wa_mlow_rc` — the Opus/CELT range decoder (ec_dec) in C, **bit-exact** against 2000 + 1500 KAT ops.
+- `wa_mlow` — the TOC parse (per-frame Opus / MLow / DTX routing), KAT over all 256 bytes; the audio engine
+  routes each inbound frame accordingly. **Opus frames decode and play.**
+- The MLow *speech* DSP (LSF → LPC → pitch → excitation → CELP synthesis → post-filters) is not yet ported; it is
+  only needed to hear the OFFICIAL client (which sends MLow by default). **Two WhatsApp6 devices call each other
+  with Opus and need no MLow DSP.**
+
+### Remaining (device, deferred by the user)
+- Live pairing with the user's number; the call media loop end to end (STUN allocate over `wa_rtc` + routing the
+  SRTP-wrapped audio) verified on the device; the MLow speech-DSP decoder (a large staged port).
 
 ## Earlier (protocol core)
 
