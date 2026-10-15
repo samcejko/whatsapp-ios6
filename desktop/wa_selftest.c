@@ -18,6 +18,7 @@
 #include "wa_user.h"
 #include "wa_sessions.h"
 #include "wa_mlow_rc.h"
+#include "wa_mlow.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -100,6 +101,7 @@ int main(void)
     check("usync device list + prekey bundle parse", wa_user_selftest() == 0);
     check("Signal session store (put/get/persist)", wa_sessions_selftest() == 0);
     check("MLow range decoder (ec_dec: icdf/bits/bit_logp/uint/cdf, 2000+1500 ops)", wa_mlow_rc_selftest() == 0);
+    check("MLow TOC parse (all 256 bytes)", wa_mlow_toc_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }

@@ -14,5 +14,7 @@
 - (void)stop;
 // Feed one received encoded frame (Opus) for playback.
 - (void)playOpusFrame:(NSData *)frame;
+// Feed one received RTP audio payload (routed by its MLow TOC byte: Opus / DTX / MLow).
+- (void)playFrame:(NSData *)frame;
 
 @end

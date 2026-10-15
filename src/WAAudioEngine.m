@@ -3,6 +3,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #include "opus.h"
+#include "wa_mlow.h"
 #include <pthread.h>
 
 #define WA_SR 16000
@@ -69,6 +70,32 @@
     int16_t pcm[WA_FRAME];
     int n = opus_decode(_dec, frame.bytes, (opus_int32)frame.length, pcm, WA_FRAME, 0);
     if (n == WA_FRAME) [self pushPCM:pcm];
+}
+
+// Route one received RTP audio payload (MLow TOC in the first byte) to the right decoder.
+- (void)playFrame:(NSData *)frame
+{
+    if (!frame.length) return;
+    const uint8_t *b = frame.bytes;
+    switch (wa_mlow_route_of(b[0])) {
+    case WA_MLOW_OPUS:
+        [self playOpusFrame:frame];
+        break;
+    case WA_MLOW_DTX: {
+        // comfort noise / packet-loss fill: one silent frame keeps the clock moving
+        int16_t z[WA_FRAME];
+        memset(z, 0, sizeof z);
+        [self pushPCM:z];
+        break;
+    }
+    case WA_MLOW_SMPL: {
+        // MLow smpl DSP decode is the staged port in core/wa_mlow*; until it lands, fill to hold timing
+        int16_t z[WA_FRAME];
+        memset(z, 0, sizeof z);
+        [self pushPCM:z];
+        break;
+    }
+    }
 }
 
 // --- the single VoiceProcessingIO render callback handles both capture and playback ---
