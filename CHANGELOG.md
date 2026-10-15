@@ -18,10 +18,19 @@
 - `wa_client` — the connection driver: connect, handshake, encrypt/decrypt stanzas, run the QR pairing exchange,
   keepalive, reconnect.
 - `core/rtc/` — the GFN6 WebRTC media stack (STUN / DTLS-SRTP / SCTP / RTP / RTCP), for the call media to come.
+- `wa_srtp` — the call media crypto (E2E 1:1 path): SRTP session keys from the 32-byte call key + participant LID
+  (HKDF-SHA256 → AES-CM PRF), the RTP AES-CTR IV, payload encryption, the 4-byte WARP MESSAGE-INTEGRITY tag
+  (HMAC-SHA1), and send/recv ROC trackers. **KAT-verified in CI** against the meowcaller / whatsapp-rust vectors
+  (peer/self keys, RTP IV, ciphertext, WARP tag all match byte-for-byte).
+- `wa_call` — 1:1 call signaling: builders for the `<call>` stanzas (offer / preaccept / accept / transport /
+  terminate / reject / mute_v2 / relaylatency / heartbeat) with the load-bearing `<offer>` child order, plus
+  offer parsing. Round-trip + child-order self-test.
 - `desktop/` — an offline self-test harness (run in CI) and a development pairing CLI.
-- CI: compiles the core on Linux and runs the offline self-tests on every push.
+- CI: compiles the core on Linux and runs the offline self-tests on every push (now 6 groups, all green).
 
 ### Next
-- `<call>` signaling (offer / preaccept / accept / transport / terminate) and SRTP media over the relay.
-- Messaging: Signal sessions (libsignal-protocol in C), history sync, media.
+- Wire the RTC stack to the WhatsApp relay (DTLS + SCTP data channel to the `<relay>` endpoint) and run WARP-framed
+  SRTP media; the crypto and signaling for it are in place.
+- Per-device `<enc>` call-key encryption via Signal sessions (libsignal-protocol in C) — shared with messaging.
+- Audio (MLow decode + Opus, VoiceProcessingIO at 16 kHz) and the H.264 hardware-encode spike on the device.
 - The iOS 6 app UI (skeuomorphic; the call screen like the iOS 6 Phone/FaceTime screen).
