@@ -2,6 +2,7 @@
 // trip, the protobuf writer/reader, and a client-payload sanity check. No network, no account - safe to run in CI.
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "wa_util.h"
 #include "wa_crypto.h"

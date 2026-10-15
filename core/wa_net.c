@@ -134,7 +134,7 @@ static int bio_send(void *ctx, const unsigned char *buf, size_t len)
 #else
     ssize_t n = send(ws->fd, buf, len, 0);
 #endif
-    if (n < 0) return sock_would_block() ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
+    if (n < 0) return sock_would_block() ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     return (int)n;
 }
 
@@ -146,8 +146,8 @@ static int bio_recv(void *ctx, unsigned char *buf, size_t len)
 #else
     ssize_t n = recv(ws->fd, buf, len, 0);
 #endif
-    if (n < 0) return sock_would_block() ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
-    if (n == 0) return MBEDTLS_ERR_NET_CONN_RESET;
+    if (n < 0) return sock_would_block() ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    if (n == 0) return MBEDTLS_ERR_SSL_CONN_EOF;
     return (int)n;
 }
 
@@ -201,7 +201,7 @@ static int tls_read_some(wa_ws *ws, int timeout_ms)
 #ifdef MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET
         if (n == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) continue;
 #endif
-        if (n == 0 || n == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || n == MBEDTLS_ERR_NET_CONN_RESET) {
+        if (n == 0 || n == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || n == MBEDTLS_ERR_SSL_CONN_EOF) {
             snprintf(ws->error, sizeof ws->error, "connection closed by the server");
             return got ? 1 : -1;
         }
