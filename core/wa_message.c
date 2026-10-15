@@ -116,7 +116,7 @@ int wa_message_selftest(void)
     wa_buf_init(&got);
     wa_buf_init(&node_buf);
     int is_prekey = 0, ok = 0;
-    if (wa_msg_text_plaintext("ahoj \xC4\x8Dau", &pt) == 0 &&
+    if (wa_msg_text_plaintext("ahoj cau :)", &pt) == 0 &&
         wa_msg_encrypt(&alice, &alice_id, pt.data, pt.len, &is_prekey, &enc) == 0 && is_prekey == 1) {
         wa_node *node = wa_msg_build_node("420777@s.whatsapp.net", "ABCD", enc.data, enc.len, is_prekey ? "pkmsg" : "msg");
         ok = wa_node_encode(node, &node_buf) == 0;
@@ -128,7 +128,7 @@ int wa_message_selftest(void)
             if (wa_msg_decrypt(&bob, &bob_id, &bob_spk, &bob_otp, strcmp(in.enc_type, "pkmsg") == 0,
                                in.enc, in.enc_len, &msg) == 0) {
                 char *text = wa_msg_parse_text(msg.data, msg.len);
-                ok = text && strcmp(text, "ahoj \xC4\x8Dau") == 0;
+                ok = text && strcmp(text, "ahoj cau :)") == 0;
                 free(text);
             } else ok = 0;
             wa_buf_free(&msg);

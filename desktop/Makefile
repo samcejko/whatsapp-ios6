@@ -16,7 +16,9 @@ CFLAGS += -I$(CORE) -I$(CORE)/rtc -I$(VENDOR)/monocypher -I$(MBEDTLS)/include -I
 CFLAGS += -DMBEDTLS_USER_CONFIG_FILE='"mbedtls_config_host.h"' -I$(VENDOR)
 LDLIBS := -lz -lpthread
 
-CORE_SRC := $(wildcard $(CORE)/*.c) $(wildcard $(CORE)/rtc/*.c) $(VENDOR)/monocypher/monocypher.c
+# The live relay transport (wa_rtc + core/rtc gf_*) is iOS-only (arc4random, VideoToolbox, device sockets); the
+# offline self-tests don't exercise it, so it's excluded from the desktop build.
+CORE_SRC := $(filter-out $(CORE)/wa_rtc.c, $(wildcard $(CORE)/*.c)) $(VENDOR)/monocypher/monocypher.c
 MBEDTLS_SRC := $(wildcard $(MBEDTLS)/library/*.c)
 
 CORE_OBJ := $(CORE_SRC:.c=.o)
