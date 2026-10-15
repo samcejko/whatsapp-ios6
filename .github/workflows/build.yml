@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # publish packages to a per-arch CI prerelease (the artifact store quota is often full)
 
 env:
   THEOS: /home/runner/theos
@@ -192,17 +192,35 @@ jobs:
           (cd /tmp/ipa && zip -qr9 "$GITHUB_WORKSPACE/packages/WhatsApp6-$VERSION${{ matrix.suffix }}.ipa" Payload)
           ls -la packages/
 
-      - name: Upload packages
+      # The build is what the job proves. The account-wide artifact store is frequently over quota, so the upload
+      # is best-effort and the packages are also published to a per-arch CI prerelease (downloadable regardless).
+      - name: Verify the packages were built
+        run: |
+          ls -la packages/
+          ls packages/*.deb >/dev/null && ls packages/*.ipa >/dev/null
+
+      - name: Upload packages (best-effort; quota may block it)
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             packages/*.ipa
             packages/*.deb
-          if-no-files-found: error
+          if-no-files-found: warn
 
-      - name: Upload build log
+      - name: Publish packages to the CI prerelease
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="ci-${{ matrix.name }}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --title "CI ${{ matrix.name }}" --notes "Automated build; latest commit ${{ github.sha }}"
+          gh release upload "$TAG" packages/*.deb packages/*.ipa --clobber
+
+      - name: Upload build log (best-effort)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ matrix.name }}
