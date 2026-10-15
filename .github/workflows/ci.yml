@@ -1,0 +1,45 @@
+name: CI (WhatsApp6 core self-tests)
+
+# Compiles the protocol core on an ordinary Linux runner and runs the OFFLINE self-tests only: crypto vectors,
+# the binary-node round trip, protobuf and the client payload. No network, no WhatsApp account, no media - live
+# pairing and calls are tested from the device, never here.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MBEDTLS_VERSION: "3.6.7"
+
+jobs:
+  selftest:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential zlib1g-dev curl
+
+      - name: Fetch mbedTLS ${{ env.MBEDTLS_VERSION }}
+        run: |
+          set -e
+          curl -sSL "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${MBEDTLS_VERSION}/mbedtls-${MBEDTLS_VERSION}.tar.bz2" -o /tmp/mbedtls.tar.bz2
+          rm -rf vendor/mbedtls && mkdir -p vendor/mbedtls
+          tar -xjf /tmp/mbedtls.tar.bz2 -C vendor/mbedtls --strip-components=1
+          echo "mbedTLS sources: $(ls vendor/mbedtls/library/*.c | wc -l)"
+
+      - name: Build core + harness
+        working-directory: desktop
+        run: make -j"$(nproc)" all
+
+      - name: Run offline self-tests
+        working-directory: desktop
+        run: ./wa_selftest
