@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WhatsApp6 app icon: a glossy green iOS 6 tile with a white speech bubble holding a classic telephone handset.
+     Deliberately not WhatsApp's own mark (different bubble shape, handset style, iOS 6 gloss). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ddc84"/>
+      <stop offset="0.5" stop-color="#17b85b"/>
+      <stop offset="1" stop-color="#0a8f45"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#tile)"/>
+  <!-- speech bubble (rounded square + tail), white -->
+  <path d="M250 230 h524 a70 70 0 0 1 70 70 v360 a70 70 0 0 1 -70 70 h-300 l-150 120 v-120 h-74 a70 70 0 0 1 -70 -70 v-360 a70 70 0 0 1 70 -70 z"
+        fill="#ffffff"/>
+  <!-- classic telephone handset, green -->
+  <g transform="translate(512 500) rotate(-32)" fill="#0a8f45">
+    <path d="M-150 -70 c-30 0 -46 20 -40 54 c24 150 150 276 300 300 c34 6 54 -10 54 -40 l0 -74 c0 -22 -14 -36 -34 -40 l-78 -16 c-18 -4 -34 2 -44 18 l-18 28 c-60 -32 -108 -80 -140 -140 l28 -18 c16 -10 22 -26 18 -44 l-16 -78 c-4 -20 -18 -34 -40 -34 z"/>
+  </g>
+  <!-- iOS 6 top gloss -->
+  <path d="M0 0 h1024 v300 c-200 120 -824 120 -1024 0 z" fill="url(#gloss)"/>
+</svg>

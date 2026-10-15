@@ -1,0 +1,9 @@
+Package: com.samcejko.whatsapp6
+Name: WhatsApp6
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: Unofficial WhatsApp linked-device client for iOS 6: 1:1 voice and video calls, text and group chats, as a linked device like WhatsApp Web
+Maintainer: samcejko
+Author: samcejko
+Section: Social
+Depends: firmware (>= 6.0), firmware (<< 11.0)

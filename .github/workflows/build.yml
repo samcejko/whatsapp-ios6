@@ -1,0 +1,210 @@
+name: Build WhatsApp6 (iOS 6 armv7 + iOS 14 arm64)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  THEOS: /home/runner/theos
+  MBEDTLS_VERSION: "3.6.7"
+  OPUS_VERSION: "1.4"
+  QRCODEGEN_TAG: "v1.8.0"
+  THEOS_CACHE_KEY: theos-linux-clang11-sdk93-sdk165-v2
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ios6-armv7
+            scheme: ""
+            suffix: ""
+            artifact: WhatsApp6-packages
+          - name: ios14-arm64
+            scheme: rootless
+            suffix: "-arm64"
+            artifact: WhatsApp6-packages-arm64
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential fakeroot rsync curl perl zip unzip git libxml2 xz-utils python3-pil fonts-dejavu-core librsvg2-bin libplist-utils libtinfo5 || \
+          sudo apt-get install -y --no-install-recommends \
+            build-essential fakeroot rsync curl perl zip unzip git libxml2 xz-utils python3-pil fonts-dejavu-core librsvg2-bin libplist-utils
+
+      - name: Restore Theos cache
+        id: theos-cache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/theos
+          key: ${{ env.THEOS_CACHE_KEY }}
+
+      - name: Install Theos, toolchain and the iOS 9.3 and 16.5 SDKs
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/toolchain" "$THEOS/sdks"
+          curl -sSL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz | tar -xJ -C "$THEOS/toolchain/"
+          if [ ! -x "$THEOS/toolchain/linux/iphone/bin/clang" ]; then
+            CLANG=$(find "$THEOS/toolchain" -type f -name clang -path '*/bin/*' | head -n1)
+            ROOT=$(dirname "$(dirname "$CLANG")")
+            mkdir -p "$THEOS/toolchain/linux"
+            ln -sfn "$ROOT" "$THEOS/toolchain/linux/iphone"
+          fi
+          RELEASE=$(curl -sS https://api.github.com/repos/theos/sdks/releases/latest)
+          for SDK in 9.3 16.5; do
+            SDK_URL=$(echo "$RELEASE" | grep -o "https://[^\"]*iPhoneOS${SDK}\.sdk[^\"]*" | head -n1 || true)
+            if [ -n "$SDK_URL" ]; then
+              curl -sSL "$SDK_URL" -o /tmp/sdk.archive
+              (tar -xJf /tmp/sdk.archive -C "$THEOS/sdks/" 2>/dev/null || tar -xzf /tmp/sdk.archive -C "$THEOS/sdks/" 2>/dev/null || unzip -q /tmp/sdk.archive -d "$THEOS/sdks/")
+            fi
+            if [ ! -d "$THEOS/sdks/iPhoneOS${SDK}.sdk" ]; then
+              rm -rf /tmp/sdks
+              git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdks
+              (cd /tmp/sdks && git sparse-checkout set "iPhoneOS${SDK}.sdk")
+              mv "/tmp/sdks/iPhoneOS${SDK}.sdk" "$THEOS/sdks/"
+            fi
+          done
+          ls "$THEOS/sdks"
+
+      - name: Fetch mbedTLS ${{ env.MBEDTLS_VERSION }}
+        run: |
+          set -e
+          curl -sSL "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${MBEDTLS_VERSION}/mbedtls-${MBEDTLS_VERSION}.tar.bz2" -o /tmp/mbedtls.tar.bz2
+          rm -rf vendor/mbedtls && mkdir -p vendor/mbedtls
+          tar -xjf /tmp/mbedtls.tar.bz2 -C vendor/mbedtls --strip-components=1
+          mv vendor/mbedtls/include/mbedtls/mbedtls_config.h vendor/mbedtls/include/mbedtls/mbedtls_config_default.h
+          cp vendor/mbedtls_config_ios6.h vendor/mbedtls/include/mbedtls/mbedtls_config.h
+          echo "mbedTLS sources: $(ls vendor/mbedtls/library/*.c | wc -l)"
+
+      - name: Fetch libopus ${{ env.OPUS_VERSION }}
+        run: |
+          set -e
+          curl -sSL "https://github.com/xiph/opus/releases/download/v${OPUS_VERSION}/opus-${OPUS_VERSION}.tar.gz" -o /tmp/opus.tar.gz
+          rm -rf vendor/opus && mkdir -p vendor/opus
+          tar -xzf /tmp/opus.tar.gz -C vendor/opus --strip-components=1
+          echo "opus sources: $(ls vendor/opus/src/*.c vendor/opus/celt/*.c vendor/opus/silk/*.c vendor/opus/silk/fixed/*.c | wc -l)"
+
+      - name: Fetch qrcodegen ${{ env.QRCODEGEN_TAG }}
+        run: |
+          set -e
+          rm -rf vendor/qrcodegen && mkdir -p vendor/qrcodegen
+          curl -sSL "https://raw.githubusercontent.com/nayuki/QR-Code-generator/${QRCODEGEN_TAG}/c/qrcodegen.c" -o vendor/qrcodegen/qrcodegen.c
+          curl -sSL "https://raw.githubusercontent.com/nayuki/QR-Code-generator/${QRCODEGEN_TAG}/c/qrcodegen.h" -o vendor/qrcodegen/qrcodegen.h
+          grep -c "qrcodegen_encodeText" vendor/qrcodegen/qrcodegen.h
+
+      - name: Collect license texts (shipped inside the app)
+        run: |
+          set -e
+          rm -rf Resources/licenses && mkdir -p Resources/licenses
+          cp LICENSE Resources/licenses/WhatsApp6-LICENSE.txt
+          cp THIRD-PARTY-NOTICES.md Resources/licenses/THIRD-PARTY-NOTICES.txt
+          cp vendor/mbedtls/LICENSE Resources/licenses/mbedtls-LICENSE.txt
+          cp vendor/opus/COPYING Resources/licenses/opus-COPYING.txt
+          cp vendor/monocypher/LICENCE.md Resources/licenses/monocypher-LICENCE.txt
+          ls -la Resources/licenses
+
+      - name: Generate icons and launch images
+        run: python3 tools/gen_assets.py Resources
+
+      - name: Patch the iOS 9.3 SDK (stub re-exported libraries missing from theos/sdks)
+        run: |
+          set -e
+          TBIN="$THEOS/toolchain/linux/iphone/bin"
+          if [ -x /usr/bin/plistutil ]; then ln -sf /usr/bin/plistutil "$TBIN/plistutil"; fi
+          SDK="$THEOS/sdks/iPhoneOS9.3.sdk"
+          LIBSYS="$SDK/usr/lib/libSystem.tbd"
+          test -f "$LIBSYS"
+          for lib in $(grep -o "/usr/lib/system/lib[A-Za-z0-9_]*\.dylib" "$LIBSYS" | sort -u); do
+            base="${lib%.dylib}"
+            if [ ! -f "$SDK$base.tbd" ] && [ ! -f "$SDK$lib" ]; then
+              mkdir -p "$(dirname "$SDK$base.tbd")"
+              printf -- '---\narchs:           [ armv7, armv7s, arm64 ]\nplatform:        ios\ninstall-name:    %s\ncurrent-version: 1.0\ncompatibility-version: 1.0\nexports:\n  - archs:           [ armv7, armv7s, arm64 ]\n    symbols:         [ ]\n...\n' "$lib" > "$SDK$base.tbd"
+            fi
+          done
+          LIBC="$SDK/usr/lib/system/libsystem_c.tbd"
+          ADD=""
+          for sym in _memcpy _memset _memmove _memcmp _memchr _strchr _strcmp _strncmp _strlen _strnlen _bzero \
+                     _strcpy _strncpy _strcat _strlcpy _strlcat _strstr _strrchr _strdup _memset_s _memset_pattern4 \
+                     _memset_pattern8 _memset_pattern16 _strncasecmp _strcasecmp _snprintf _vsnprintf _sscanf _strtol _strtoll _strtoull _atoi _atol _qsort; do
+            if ! grep -Eq "[[ ,]${sym}[], ]" "$LIBC" "$SDK/usr/lib/system/libsystem_platform.tbd"; then
+              ADD="${ADD}${sym}, "
+            fi
+          done
+          if [ -n "$ADD" ]; then
+            sed -i "0,/symbols:            \[ /s//symbols:            [ ${ADD}/" "$LIBC"
+          fi
+
+      - name: Syntax check (every error of our own sources in one go)
+        run: |
+          export PATH="$THEOS/toolchain/linux/iphone/bin:$THEOS/bin:$PATH"
+          SDK="$THEOS/sdks/iPhoneOS9.3.sdk"
+          FLAGS="-target armv7-apple-ios6.0 -isysroot $SDK -fsyntax-only -w -ferror-limit=0 \
+                 -Isrc -Icore -Icore/rtc -Ivendor -Ivendor/monocypher -Ivendor/mbedtls/include -Ivendor/mbedtls/library \
+                 -Ivendor/opus/include -Ivendor/qrcodegen"
+          status=0
+          for f in $(find src -name '*.m' | sort); do
+            clang $FLAGS -fobjc-arc -x objective-c "$f" 2>&1 | grep -E 'error:' && status=1
+          done
+          for f in $(find core -name '*.c' | sort); do
+            clang $FLAGS -x c "$f" 2>&1 | grep -E 'error:' && status=1
+          done
+          if [ $status -ne 0 ]; then echo "SYNTAX CHECK FOUND ERRORS"; else echo "syntax check clean"; fi
+
+      - name: Build (${{ matrix.name }})
+        run: |
+          set -o pipefail
+          export PATH="$THEOS/toolchain/linux/iphone/bin:$THEOS/bin:$PATH"
+          if [ -n "${{ matrix.scheme }}" ]; then export THEOS_PACKAGE_SCHEME="${{ matrix.scheme }}"; fi
+          make clean || true
+          make package FINALPACKAGE=1 -j"$(nproc)" -k 2>&1 | tee build.log
+          APP=$(find .theos/_ -type d -name WhatsApp6.app | head -n1)
+          test -n "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          ls -la "$APP"
+          lipo -info "$APP/WhatsApp6" 2>/dev/null || true
+
+      - name: Make IPA
+        run: |
+          set -e
+          export PATH="$THEOS/toolchain/linux/iphone/bin:$THEOS/bin:$PATH"
+          LDID=$(command -v ldid || find "$THEOS" -type f -name ldid | head -n1)
+          ENT=entitlements.xml
+          if [ -n "${{ matrix.scheme }}" ]; then ENT=entitlements-arm64.xml; fi
+          "$LDID" -S"$GITHUB_WORKSPACE/$ENT" "$APP/WhatsApp6"
+          VERSION=$(grep '^Version:' control | cut -d' ' -f2)
+          rm -rf /tmp/ipa && mkdir -p /tmp/ipa/Payload packages
+          cp -a "$APP" /tmp/ipa/Payload/
+          (cd /tmp/ipa && zip -qr9 "$GITHUB_WORKSPACE/packages/WhatsApp6-$VERSION${{ matrix.suffix }}.ipa" Payload)
+          ls -la packages/
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            packages/*.ipa
+            packages/*.deb
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.name }}
+          path: build.log
+          if-no-files-found: ignore

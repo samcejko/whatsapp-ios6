@@ -1,0 +1,168 @@
+#import "WACallViewController.h"
+#import "WATheme.h"
+#import "../WACommon.h"
+#import <QuartzCore/QuartzCore.h>
+
+@interface WACallViewController ()
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic) BOOL video;
+@property (nonatomic) BOOL incoming;
+@property (nonatomic) BOOL connected;
+@property (nonatomic) BOOL muted;
+@property (nonatomic, strong) UILabel *nameLabel;
+@property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UIView *avatar;
+@property (nonatomic, strong) NSMutableArray *buttons;
+@property (nonatomic, strong) NSTimer *timer;
+@property (nonatomic) NSTimeInterval startTime;
+@end
+
+@implementation WACallViewController
+
+- (instancetype)initWithName:(NSString *)name video:(BOOL)video incoming:(BOOL)incoming
+{
+    if ((self = [super init])) {
+        _name = [name copy];
+        _video = video;
+        _incoming = incoming;
+    }
+    return self;
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    [self drawBackground];
+
+    self.avatar = [[UIView alloc] init];
+    self.avatar.backgroundColor = [UIColor colorWithWhite:1 alpha:0.15];
+    self.avatar.layer.cornerRadius = 55;
+    [self.view addSubview:self.avatar];
+    UILabel *initial = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 110, 110)];
+    initial.textAlignment = NSTextAlignmentCenter;
+    initial.font = [UIFont systemFontOfSize:48];
+    initial.textColor = [UIColor whiteColor];
+    initial.backgroundColor = [UIColor clearColor];
+    initial.text = self.name.length ? [[self.name substringToIndex:1] uppercaseString] : @"?";
+    [self.avatar addSubview:initial];
+
+    self.nameLabel = [[UILabel alloc] init];
+    self.nameLabel.textAlignment = NSTextAlignmentCenter;
+    self.nameLabel.font = [UIFont systemFontOfSize:28];
+    self.nameLabel.textColor = [UIColor whiteColor];
+    self.nameLabel.backgroundColor = [UIColor clearColor];
+    self.nameLabel.text = self.name;
+    [self.view addSubview:self.nameLabel];
+
+    self.statusLabel = [[UILabel alloc] init];
+    self.statusLabel.textAlignment = NSTextAlignmentCenter;
+    self.statusLabel.font = [UIFont systemFontOfSize:16];
+    self.statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    self.statusLabel.backgroundColor = [UIColor clearColor];
+    self.statusLabel.text = self.incoming ? (self.video ? WALoc(@"call_incoming_video") : WALoc(@"call_incoming"))
+                                          : WALoc(@"call_outgoing");
+    [self.view addSubview:self.statusLabel];
+
+    self.buttons = [NSMutableArray array];
+    if (self.incoming) {
+        [self addButton:WALoc(@"call_decline") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
+        [self addButton:WALoc(@"call_accept") color:[WATheme accent] glyph:@"✓" action:@selector(accept)];
+    } else {
+        [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
+        [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
+        [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:@selector(noop)];
+    }
+
+    // Outgoing calls "ring" then "connect" (the real transitions come from the call engine's signaling events).
+    if (!self.incoming) {
+        [self performSelector:@selector(setRinging) withObject:nil afterDelay:0.8];
+    }
+}
+
+- (void)drawBackground
+{
+    CAGradientLayer *g = [CAGradientLayer layer];
+    g.frame = self.view.bounds;
+    UIColor *top = [UIColor colorWithRed:0.10 green:0.30 blue:0.28 alpha:1.0];
+    UIColor *bot = [UIColor colorWithRed:0.02 green:0.12 blue:0.11 alpha:1.0];
+    g.colors = @[ (id)top.CGColor, (id)bot.CGColor ];
+    [self.view.layer insertSublayer:g atIndex:0];
+    self.view.backgroundColor = bot;
+}
+
+- (void)addButton:(NSString *)title color:(UIColor *)color glyph:(NSString *)glyph action:(SEL)action
+{
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
+    [b setImage:[WATheme roundCallButton:color diameter:72 glyph:glyph] forState:UIControlStateNormal];
+    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    UILabel *cap = [[UILabel alloc] init];
+    cap.text = title;
+    cap.font = [UIFont systemFontOfSize:12];
+    cap.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    cap.textAlignment = NSTextAlignmentCenter;
+    cap.backgroundColor = [UIColor clearColor];
+    cap.tag = 99;
+    [b addSubview:cap];
+    [self.view addSubview:b];
+    [self.buttons addObject:b];
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    CGFloat w = self.view.bounds.size.width, h = self.view.bounds.size.height;
+    self.avatar.frame = CGRectMake((w - 110) / 2, h * 0.16, 110, 110);
+    self.nameLabel.frame = CGRectMake(20, h * 0.16 + 128, w - 40, 34);
+    self.statusLabel.frame = CGRectMake(20, h * 0.16 + 166, w - 40, 22);
+    NSInteger n = self.buttons.count;
+    CGFloat bd = 72, gap = (w - n * bd) / (n + 1);
+    CGFloat y = h - bd - 48;
+    for (NSInteger i = 0; i < n; i++) {
+        UIButton *b = self.buttons[i];
+        b.frame = CGRectMake(gap + i * (bd + gap), y, bd, bd);
+        UILabel *cap = (UILabel *)[b viewWithTag:99];
+        cap.frame = CGRectMake(-10, bd + 4, bd + 20, 16);
+    }
+}
+
+- (void)setRinging { if (!self.connected) self.statusLabel.text = WALoc(@"call_ringing"); [self performSelector:@selector(connect) withObject:nil afterDelay:1.2]; }
+
+- (void)connect
+{
+    self.connected = YES;
+    self.startTime = [NSDate timeIntervalSinceReferenceDate];
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
+    [self tick];
+}
+
+- (void)tick
+{
+    int secs = (int)([NSDate timeIntervalSinceReferenceDate] - self.startTime);
+    self.statusLabel.text = [NSString stringWithFormat:@"%d:%02d", secs / 60, secs % 60];
+}
+
+- (void)accept { self.incoming = NO; [self.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)]; [self.buttons removeAllObjects];
+    [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
+    [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
+    [self addButton:WALoc(@"call_speaker") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"◉" action:@selector(noop)];
+    [self viewDidLayoutSubviews];
+    [self connect];
+}
+
+- (void)toggleMute { self.muted = !self.muted; WALog(@"call mute=%d", self.muted); }
+- (void)noop {}
+
+- (void)hangup
+{
+    [self.timer invalidate];
+    self.timer = nil;
+    self.statusLabel.text = WALoc(@"call_ended");
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    [self performSelector:@selector(dismiss) withObject:nil afterDelay:0.5];
+}
+
+- (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
+
+- (void)dealloc { [self.timer invalidate]; }
+
+@end

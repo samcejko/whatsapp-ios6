@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>com.samcejko.whatsapp6</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>com.samcejko.whatsapp6</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+	<!-- iOS 14+ (arm64 build only): the app runs in its own sandbox container, named after the bundle id so
+	     LaunchServices and the sandbox agree, or the system refuses its files and IOSurface. -->
+	<key>com.apple.private.security.container-required</key>
+	<string>com.samcejko.whatsapp6</string>
+</dict>
+</plist>
