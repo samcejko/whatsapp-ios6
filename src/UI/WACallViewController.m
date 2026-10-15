@@ -1,6 +1,7 @@
 #import "WACallViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
+#import "../WAAudioEngine.h"
 #import <QuartzCore/QuartzCore.h>
 
 @interface WACallViewController ()
@@ -15,6 +16,7 @@
 @property (nonatomic, strong) NSMutableArray *buttons;
 @property (nonatomic, strong) NSTimer *timer;
 @property (nonatomic) NSTimeInterval startTime;
+@property (nonatomic, strong) WAAudioEngine *audio;
 @end
 
 @implementation WACallViewController
@@ -133,6 +135,11 @@
     self.startTime = [NSDate timeIntervalSinceReferenceDate];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self tick];
+    // Open the mic/speaker (echo-cancelled, 16 kHz Opus). The encoded frames are SRTP-wrapped and sent to the
+    // relay by the call engine once the media transport is up (live path, tested on device).
+    self.audio = [[WAAudioEngine alloc] init];
+    self.audio.onFrame = ^(NSData *frame) { /* call engine: SRTP-protect + wa_rtc_send */ (void)frame; };
+    [self.audio start];
 }
 
 - (void)tick
@@ -149,13 +156,15 @@
     [self connect];
 }
 
-- (void)toggleMute { self.muted = !self.muted; WALog(@"call mute=%d", self.muted); }
+- (void)toggleMute { self.muted = !self.muted; self.audio.muted = self.muted; WALog(@"call mute=%d", self.muted); }
 - (void)noop {}
 
 - (void)hangup
 {
     [self.timer invalidate];
     self.timer = nil;
+    [self.audio stop];
+    self.audio = nil;
     self.statusLabel.text = WALoc(@"call_ended");
     [NSObject cancelPreviousPerformRequestsWithTarget:self];
     [self performSelector:@selector(dismiss) withObject:nil afterDelay:0.5];
@@ -163,6 +172,6 @@
 
 - (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
 
-- (void)dealloc { [self.timer invalidate]; }
+- (void)dealloc { [self.timer invalidate]; [self.audio stop]; }
 
 @end

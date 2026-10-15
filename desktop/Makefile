@@ -12,11 +12,11 @@ MBEDTLS := $(VENDOR)/mbedtls
 
 CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
-CFLAGS += -I$(CORE) -I$(VENDOR)/monocypher -I$(MBEDTLS)/include -I$(MBEDTLS)/library
+CFLAGS += -I$(CORE) -I$(CORE)/rtc -I$(VENDOR)/monocypher -I$(MBEDTLS)/include -I$(MBEDTLS)/library
 CFLAGS += -DMBEDTLS_USER_CONFIG_FILE='"mbedtls_config_host.h"' -I$(VENDOR)
 LDLIBS := -lz -lpthread
 
-CORE_SRC := $(wildcard $(CORE)/*.c) $(VENDOR)/monocypher/monocypher.c
+CORE_SRC := $(wildcard $(CORE)/*.c) $(wildcard $(CORE)/rtc/*.c) $(VENDOR)/monocypher/monocypher.c
 MBEDTLS_SRC := $(wildcard $(MBEDTLS)/library/*.c)
 
 CORE_OBJ := $(CORE_SRC:.c=.o)
