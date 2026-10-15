@@ -30,7 +30,22 @@ void wa_mlow_parse_toc(uint8_t b, wa_mlow_toc *out);
 typedef enum { WA_MLOW_OPUS, WA_MLOW_SMPL, WA_MLOW_DTX } wa_mlow_route;
 wa_mlow_route wa_mlow_route_of(uint8_t first_byte);
 
+// --- MLow smpl decode (staged port) ---
+#include "wa_mlow_rc.h"
+
+// Cross-internal-frame LSF/predictor state.
+typedef struct {
+    int prev_stage1, prev_match, have_prev;
+    int prev_gain_idx, prev_filt_idx, prev_lag, prev_frac_lag;
+} wa_mlow_lsf_state;
+
+typedef struct { int stage1, grid, stage2[16], extra; } wa_mlow_lsf_indices;
+
+// Decode the LSF index block of one internal frame from the range coder. config 0/1, intf 0..2.
+void wa_mlow_decode_lsf(wa_rc *dec, int config, int intf, int active, wa_mlow_lsf_state *st, wa_mlow_lsf_indices *out);
+
 int wa_mlow_toc_selftest(void);
+int wa_mlow_lsf_selftest(void);
 
 #ifdef __cplusplus
 }

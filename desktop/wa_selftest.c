@@ -102,6 +102,7 @@ int main(void)
     check("Signal session store (put/get/persist)", wa_sessions_selftest() == 0);
     check("MLow range decoder (ec_dec: icdf/bits/bit_logp/uint/cdf, 2000+1500 ops)", wa_mlow_rc_selftest() == 0);
     check("MLow TOC parse (all 256 bytes)", wa_mlow_toc_selftest() == 0);
+    check("MLow LSF index decode (stage1/grid/stage2/extra vs vectors)", wa_mlow_lsf_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
