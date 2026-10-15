@@ -9,6 +9,7 @@
 #include "wa_proto.h"
 #include "wa_node.h"
 #include "wa_store.h"
+#include "wa_srtp.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -82,6 +83,7 @@ int main(void)
     check("binary node round trip", wa_node_selftest() == 0);
     check("protobuf writer/reader", test_proto());
     check("client payload + device store", test_payload());
+    check("call SRTP (E2E keys, RTP IV, AES-CTR, WARP tag, ROC)", wa_srtp_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
