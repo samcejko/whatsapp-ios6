@@ -31,13 +31,17 @@ a skeuomorphic iOS 6 UI. CI compiles both architectures and runs the offline sel
 - The app sends and receives real encrypted text; the chat list and chat view update; call buttons send a real
   encrypted `<offer>`; the call screen opens the echo-cancelled 16 kHz Opus audio engine.
 
-### MLow (inbound codec) — foundation done, DSP staged
+### MLow (inbound codec) — entropy + framing + LSF stage done, synthesis staged
 - `wa_mlow_rc` — the Opus/CELT range decoder (ec_dec) in C, **bit-exact** against 2000 + 1500 KAT ops.
 - `wa_mlow` — the TOC parse (per-frame Opus / MLow / DTX routing), KAT over all 256 bytes; the audio engine
   routes each inbound frame accordingly. **Opus frames decode and play.**
-- The MLow *speech* DSP (LSF → LPC → pitch → excitation → CELP synthesis → post-filters) is not yet ported; it is
-  only needed to hear the OFFICIAL client (which sends MLow by default). **Two WhatsApp6 devices call each other
-  with Opus and need no MLow DSP.**
+- `wa_mlow` LSF stage — the stage-1 selector, grid and 16 stage-2 residual indices, **KAT vs lsf_vectors** with
+  the runtime CDF tables embedded from the captured `smpl_tables.json`.
+- The remaining MLow smpl stages (pitch/LTP, pulses, gains, comfort-noise, LSF→LPC, CELP synthesis, post-filters)
+  are a large interconnected codec: later stages rebuild the decoder's runtime memory image from seed blobs and
+  the audio-synthesis vectors are only published compressed. Porting them to a verified, bit-exact decoder is a
+  multi-session effort. **It is only needed to hear the OFFICIAL client (which sends MLow); two WhatsApp6 devices
+  call each other with Opus and need no MLow DSP.**
 
 ### Remaining (device, deferred by the user)
 - Live pairing with the user's number; the call media loop end to end (STUN allocate over `wa_rtc` + routing the
