@@ -126,6 +126,29 @@ int wa_rc_decode_cdf(wa_rc *d, const uint16_t *cdf, size_t n)
     return (int)k;
 }
 
+int wa_rc_decode_cdf_window(wa_rc *d, const uint16_t *base, size_t base_len, int start, int n)
+{
+    if (n < 2) { d->err = 1; return 0; }
+#define AT(i) ((start + (i)) >= 0 && (size_t)(start + (i)) < base_len ? (uint32_t)base[start + (i)] : 0u)
+    uint32_t cbase = AT(0), last = AT(n - 1);
+    if (last <= cbase) { d->err = 1; return 0; }
+    uint32_t ft = last - cbase;
+    uint32_t fs = wa_rc_decode(d, ft);
+    uint32_t target = cbase + fs;
+    int k = 0;
+    while (k < n - 1) { if (AT(k + 1) > target) break; k++; }
+    wa_rc_update(d, AT(k) - cbase, AT(k + 1) - cbase, ft);
+#undef AT
+    return k;
+}
+
+uint32_t wa_rc_decode_raw_symbol(wa_rc *d, uint32_t nbits)
+{
+    uint32_t sym = decode_bin(d, nbits);
+    wa_rc_update(d, sym, sym + 1, 1u << nbits);
+    return sym;
+}
+
 uint32_t wa_rc_bits_n(wa_rc *d, uint32_t n)
 {
     uint32_t window = d->end_window;

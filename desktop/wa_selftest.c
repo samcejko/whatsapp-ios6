@@ -19,6 +19,7 @@
 #include "wa_sessions.h"
 #include "wa_mlow_rc.h"
 #include "wa_mlow.h"
+#include "wa_mlow_cc.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -103,6 +104,8 @@ int main(void)
     check("MLow range decoder (ec_dec: icdf/bits/bit_logp/uint/cdf, 2000+1500 ops)", wa_mlow_rc_selftest() == 0);
     check("MLow TOC parse (all 256 bytes)", wa_mlow_toc_selftest() == 0);
     check("MLow LSF index decode (stage1/grid/stage2/extra vs vectors)", wa_mlow_lsf_selftest() == 0);
+    check("MLow pulse CMF tables (split/runlen build)", wa_mlow_cc_selftest() == 0);
+    check("MLow pulse decode (count/split/runs/signs vs vectors)", wa_mlow_pulse_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }

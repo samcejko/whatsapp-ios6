@@ -26,6 +26,10 @@ void wa_rc_update(wa_rc *d, uint32_t fl, uint32_t fh, uint32_t ft);
 int wa_rc_bit_logp(wa_rc *d, uint32_t logp);
 int wa_rc_decode_icdf(wa_rc *d, const uint8_t *icdf, size_t n, uint32_t ftb);
 int wa_rc_decode_cdf(wa_rc *d, const uint16_t *cdf, size_t n);
+// decode_cdf over base[start .. start+n) with out-of-range entries read as 0 (the windowed pulse/split path).
+int wa_rc_decode_cdf_window(wa_rc *d, const uint16_t *base, size_t base_len, int start, int n);
+// A uniform nbits-bit symbol read straight off the range stream (sign coder).
+uint32_t wa_rc_decode_raw_symbol(wa_rc *d, uint32_t nbits);
 uint32_t wa_rc_bits_n(wa_rc *d, uint32_t n);
 uint32_t wa_rc_decode_uint(wa_rc *d, uint32_t ft0);
 int wa_rc_decode_64_fine(wa_rc *d);

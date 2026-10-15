@@ -44,8 +44,13 @@ typedef struct { int stage1, grid, stage2[16], extra; } wa_mlow_lsf_indices;
 // Decode the LSF index block of one internal frame from the range coder. config 0/1, intf 0..2.
 void wa_mlow_decode_lsf(wa_rc *dec, int config, int intf, int active, wa_mlow_lsf_state *st, wa_mlow_lsf_indices *out);
 
+// Excitation pulses for one internal frame (p2 samples, p2 <= 320). pulses[] holds signed magnitudes per sample.
+typedef struct { int32_t subfr[4]; int32_t pulses[320]; } wa_mlow_pulse_result;
+void wa_mlow_decode_pulses(wa_rc *dec, int p2, int p3, int p4, int p6, int s1, wa_mlow_pulse_result *out);
+
 int wa_mlow_toc_selftest(void);
 int wa_mlow_lsf_selftest(void);
+int wa_mlow_pulse_selftest(void);
 
 #ifdef __cplusplus
 }
