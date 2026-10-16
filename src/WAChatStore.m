@@ -1,6 +1,7 @@
 #import "WAChatStore.h"
 #import "WACommon.h"
 #import "WASession.h"
+#include "wa_history.h"   // WA_MSG_* kinds
 
 NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
 
@@ -156,11 +157,34 @@ static NSString *msgSig(NSDictionary *m)
 {
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
     if (![e[@"name"] length]) e[@"name"] = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
-    NSDictionary *m = @{ @"text": text, @"out": @(out), @"ts": @(ts), @"id": (mid ?: @"") };
+    NSDictionary *m = @{ @"text": text, @"out": @(out), @"ts": @(ts), @"id": (mid ?: @""), @"kind": @(WA_MSG_TEXT) };
     [self mergeMessages:@[ m ] into:e];
     if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
     [self save];
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+}
+
+// A localized "📷 Photo"-style label for a media kind (shared by the list preview and the chat bubbles).
++ (NSString *)mediaLabelForKind:(int)kind
+{
+    switch (kind) {
+        case WA_MSG_IMAGE:    return [@"\U0001F4F7 " stringByAppendingString:WALoc(@"media_photo")];
+        case WA_MSG_VIDEO:    return [@"\U0001F3AC " stringByAppendingString:WALoc(@"media_video")];
+        case WA_MSG_AUDIO:    return [@"\U0001F3A4 " stringByAppendingString:WALoc(@"media_voice")];
+        case WA_MSG_DOCUMENT: return [@"\U0001F4C4 " stringByAppendingString:WALoc(@"media_document")];
+        case WA_MSG_STICKER:  return WALoc(@"media_sticker");
+        case WA_MSG_LOCATION: return [@"\U0001F4CD " stringByAppendingString:WALoc(@"media_location")];
+        case WA_MSG_CONTACT:  return [@"\U0001F464 " stringByAppendingString:WALoc(@"media_contact")];
+        default:              return @"";
+    }
+}
+
+// The one-line preview for the chat list: the text/caption when present, else a media label.
++ (NSString *)previewForMessage:(NSDictionary *)m
+{
+    NSString *text = m[@"text"];
+    if ([text isKindOfClass:[NSString class]] && text.length) return text;
+    return [self mediaLabelForKind:[m[@"kind"] intValue]];
 }
 
 - (NSArray *)conversationsSorted
@@ -168,7 +192,8 @@ static NSString *msgSig(NSDictionary *m)
     NSMutableArray *rows = [NSMutableArray arrayWithCapacity:self.chats.count];
     for (NSString *k in self.chats) {
         NSDictionary *e = self.chats[k];
-        NSString *last = [[e[@"msgs"] lastObject] objectForKey:@"text"] ?: @"";
+        NSDictionary *lastMsg = [e[@"msgs"] lastObject];
+        NSString *last = lastMsg ? [WAChatStore previewForMessage:lastMsg] : @"";
         [rows addObject:@{ @"jid": e[@"jid"] ?: @"",
                            @"name": e[@"name"] ?: @"",
                            @"last": last,

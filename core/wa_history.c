@@ -41,6 +41,25 @@
 #define F_WMI_MESSAGETIMESTAMP      3
 #define F_KEY_FROMME                2
 #define F_KEY_ID                    3
+// Message media sub-message fields:
+#define F_MSG_CONTACT               4
+#define F_MSG_LOCATION              5
+#define F_MSG_IMAGE                 3
+#define F_MSG_DOCUMENT              7
+#define F_MSG_AUDIO                 8
+#define F_MSG_VIDEO                 9
+#define F_MSG_STICKER              26
+// ImageMessage: caption=3, jpegThumbnail=16. VideoMessage: seconds=5, caption=7, jpegThumbnail=16.
+// AudioMessage: seconds=5. DocumentMessage: title=3, fileName=8, caption=20, jpegThumbnail=16. ContactMessage: displayName=1.
+#define F_IMG_CAPTION               3
+#define F_JPEG_THUMBNAIL           16
+#define F_VID_SECONDS               5
+#define F_VID_CAPTION               7
+#define F_AUD_SECONDS               5
+#define F_DOC_TITLE                 3
+#define F_DOC_FILENAME              8
+#define F_DOC_CAPTION              20
+#define F_CONTACT_DISPLAYNAME       1
 
 #define HISTORY_MEDIA_HOST   "mmg.whatsapp.net"
 #define HISTORY_HKDF_INFO    "WhatsApp History Keys"
@@ -51,8 +70,70 @@ static void conv_free(wa_history_conv *c)
     free(c->jid);
     free(c->name);
     free(c->last);
-    for (int i = 0; i < c->nmsgs; i++) { free(c->msgs[i].text); free(c->msgs[i].id); }
+    for (int i = 0; i < c->nmsgs; i++) {
+        free(c->msgs[i].text);
+        free(c->msgs[i].id);
+        free(c->msgs[i].thumb);
+        free(c->msgs[i].filename);
+    }
     free(c->msgs);
+}
+
+// Copy a bytes field (e.g. jpegThumbnail) out of a sub-message into m->thumb.
+static void copy_thumb(const uint8_t *sub, size_t subl, uint32_t field, wa_history_msg *m)
+{
+    const uint8_t *d;
+    size_t n;
+    if (pb_get_bytes(sub, subl, field, &d, &n) && n > 0) {
+        m->thumb = (uint8_t *)malloc(n);
+        if (m->thumb) { memcpy(m->thumb, d, n); m->thumb_len = n; }
+    }
+}
+
+// Fill m->{kind,text,thumb,duration,filename} from a decoded Message. Returns 1 for a displayable message, 0 to skip
+// (protocol/system messages, reactions, key distribution, …). Text and the recognised media types are displayable.
+static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_msg *m)
+{
+    char *text = wa_msg_parse_text(inner, innerl);
+    if (text) { m->kind = WA_MSG_TEXT; m->text = text; return 1; }
+
+    const uint8_t *sub;
+    size_t subl;
+    uint64_t v;
+    if (pb_get_bytes(inner, innerl, F_MSG_IMAGE, &sub, &subl)) {
+        m->kind = WA_MSG_IMAGE;
+        m->text = pb_get_string(sub, subl, F_IMG_CAPTION);
+        copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        return 1;
+    }
+    if (pb_get_bytes(inner, innerl, F_MSG_VIDEO, &sub, &subl)) {
+        m->kind = WA_MSG_VIDEO;
+        m->text = pb_get_string(sub, subl, F_VID_CAPTION);
+        copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        if (pb_get_varint(sub, subl, F_VID_SECONDS, &v)) m->duration = (uint32_t)v;
+        return 1;
+    }
+    if (pb_get_bytes(inner, innerl, F_MSG_AUDIO, &sub, &subl)) {
+        m->kind = WA_MSG_AUDIO;
+        if (pb_get_varint(sub, subl, F_AUD_SECONDS, &v)) m->duration = (uint32_t)v;
+        return 1;
+    }
+    if (pb_get_bytes(inner, innerl, F_MSG_DOCUMENT, &sub, &subl)) {
+        m->kind = WA_MSG_DOCUMENT;
+        m->filename = pb_get_string(sub, subl, F_DOC_FILENAME);
+        if (!m->filename) m->filename = pb_get_string(sub, subl, F_DOC_TITLE);
+        m->text = pb_get_string(sub, subl, F_DOC_CAPTION);
+        copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        return 1;
+    }
+    if (pb_get_bytes(inner, innerl, F_MSG_STICKER, &sub, &subl)) { m->kind = WA_MSG_STICKER; return 1; }
+    if (pb_get_bytes(inner, innerl, F_MSG_LOCATION, &sub, &subl)) { m->kind = WA_MSG_LOCATION; return 1; }
+    if (pb_get_bytes(inner, innerl, F_MSG_CONTACT, &sub, &subl)) {
+        m->kind = WA_MSG_CONTACT;
+        m->text = pb_get_string(sub, subl, F_CONTACT_DISPLAYNAME);
+        return 1;
+    }
+    return 0;
 }
 
 static int msg_cmp_ts(const void *a, const void *b)
@@ -88,8 +169,8 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
     uint64_t unread = 0;
     if (pb_get_varint(c, cl, F_CONV_UNREAD, &unread)) out->unread = (uint32_t)unread;
 
-    // Collect the text messages: scan the repeated messages (HistorySyncMsg), pulling each WebMessageInfo's text,
-    // timestamp and fromMe. Non-text messages (media, system, …) are skipped for now.
+    // Collect the messages: scan the repeated messages (HistorySyncMsg), extracting each WebMessageInfo's content
+    // (text or a recognised media kind), timestamp and fromMe. Protocol/system messages are skipped.
     wa_history_msg *msgs = NULL;
     int n = 0, mcap = 0;
     pb_reader r;
@@ -103,39 +184,33 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
         if (!pb_get_bytes(f.data, f.len, F_HSM_MESSAGE, &wmi, &wmil)) continue;   // HistorySyncMsg.message -> WebMessageInfo
         const uint8_t *inner;
         size_t innerl;
-        char *text = NULL;
-        if (pb_get_bytes(wmi, wmil, F_WMI_MESSAGE, &inner, &innerl)) text = wa_msg_parse_text(inner, innerl);
-        if (!text) continue;   // text-only for now
-        uint64_t mts = 0;
-        pb_get_varint(wmi, wmil, F_WMI_MESSAGETIMESTAMP, &mts);
-        int from_me = 0;
-        char *mid = NULL;
+        if (!pb_get_bytes(wmi, wmil, F_WMI_MESSAGE, &inner, &innerl)) continue;
+        wa_history_msg msg;
+        memset(&msg, 0, sizeof msg);
+        if (!extract_msg_content(inner, innerl, &msg)) continue;   // not a displayable message
+        pb_get_varint(wmi, wmil, F_WMI_MESSAGETIMESTAMP, &msg.timestamp);
         const uint8_t *key;
         size_t keyl;
         if (pb_get_bytes(wmi, wmil, F_WMI_KEY, &key, &keyl)) {
             uint64_t fm = 0;
-            if (pb_get_varint(key, keyl, F_KEY_FROMME, &fm)) from_me = fm ? 1 : 0;
-            mid = pb_get_string(key, keyl, F_KEY_ID);
+            if (pb_get_varint(key, keyl, F_KEY_FROMME, &fm)) msg.from_me = fm ? 1 : 0;
+            msg.id = pb_get_string(key, keyl, F_KEY_ID);
         }
         if (n >= mcap) {
             int ncap = mcap ? mcap * 2 : 16;
             wa_history_msg *p = (wa_history_msg *)realloc(msgs, (size_t)ncap * sizeof *p);
-            if (!p) { free(text); free(mid); break; }
+            if (!p) { free(msg.text); free(msg.id); free(msg.thumb); free(msg.filename); break; }
             msgs = p;
             mcap = ncap;
         }
-        msgs[n].text = text;
-        msgs[n].id = mid;
-        msgs[n].timestamp = mts;
-        msgs[n].from_me = from_me;
-        n++;
+        msgs[n++] = msg;
         if (n >= 4096) break;   // defensive per-conversation cap
     }
     if (n > 1) qsort(msgs, (size_t)n, sizeof *msgs, msg_cmp_ts);   // oldest-first for display
     out->msgs = msgs;
     out->nmsgs = n;
     if (n > 0) {
-        out->last = wa_strdup(msgs[n - 1].text);
+        if (msgs[n - 1].text) out->last = wa_strdup(msgs[n - 1].text);   // may be NULL for captionless media
         if (out->timestamp == 0) out->timestamp = msgs[n - 1].timestamp;
     }
     return 0;
@@ -305,6 +380,27 @@ static int st_build_wmi(const char *remote, const char *msgid, int text_field, c
     return ok ? 0 : -1;
 }
 
+// Build a WebMessageInfo carrying an imageMessage { caption, jpegThumbnail }. Appends the HistorySyncMsg bytes to out.
+static int st_build_image_wmi(const char *remote, const char *msgid, const char *caption,
+                              const uint8_t *thumb, size_t thumb_len, uint64_t ts, wa_buf *out)
+{
+    wa_buf key, img, inner, msg;
+    wa_buf_init(&key);
+    wa_buf_init(&img);
+    wa_buf_init(&inner);
+    wa_buf_init(&msg);
+    int ok = pb_put_string(&key, 1, remote) == 0 && pb_put_bool(&key, 2, 0) == 0 && pb_put_string(&key, 3, msgid) == 0;
+    if (ok) ok = pb_put_string(&img, F_IMG_CAPTION, caption) == 0 && pb_put_bytes(&img, F_JPEG_THUMBNAIL, thumb, thumb_len) == 0;
+    if (ok) ok = pb_put_message(&inner, F_MSG_IMAGE, &img) == 0;   // Message.imageMessage = 3
+    if (ok) ok = pb_put_message(&msg, 1, &key) == 0 && pb_put_message(&msg, 2, &inner) == 0 && pb_put_varint(&msg, 3, ts) == 0;
+    if (ok) ok = pb_put_message(out, F_HSM_MESSAGE, &msg) == 0;
+    wa_buf_free(&key);
+    wa_buf_free(&img);
+    wa_buf_free(&inner);
+    wa_buf_free(&msg);
+    return ok ? 0 : -1;
+}
+
 // Build a Conversation { id, (name|displayName), conversationTimestamp, messages[hsm] }. Appends to out as field 2.
 static int st_build_conv(const char *id, int name_field, const char *name, uint64_t ts, const wa_buf *hsm, wa_buf *out)
 {
@@ -327,7 +423,9 @@ static int st_build_history_sync(wa_buf *out)
     wa_buf hsm1, hsm2;
     wa_buf_init(&hsm1);
     wa_buf_init(&hsm2);
+    static const uint8_t st_thumb[6] = { 0xFF, 0xD8, 0xFF, 0xE0, 0x12, 0x34 };   // fake JPEG header bytes
     if (ok) ok = st_build_wmi("4915551234@s.whatsapp.net", "ID1", 1, "Ahoj, jak se mas?", 1000, &hsm1) == 0;
+    if (ok) ok = st_build_image_wmi("4915551234@s.whatsapp.net", "ID3", "Hezka fotka", st_thumb, sizeof st_thumb, 1200, &hsm1) == 0;
     if (ok) ok = st_build_wmi("120363000000000000@g.us", "ID2", 6, "Hi group", 2000, &hsm2) == 0;
     if (ok) ok = st_build_conv("4915551234@s.whatsapp.net", F_CONV_NAME, "Alice", 1500, &hsm1, out) == 0;
     if (ok) ok = st_build_conv("120363000000000000@g.us", F_CONV_DISPLAYNAME, "Parta", 2500, &hsm2, out) == 0;
@@ -357,13 +455,17 @@ static int st_convs_ok(const wa_history_result *r)
     }
     if (!a || !b) return 0;
     if (!a->name || strcmp(a->name, "Alice") != 0) return 0;
-    if (!a->last || strcmp(a->last, "Ahoj, jak se mas?") != 0) return 0;
+    if (!a->last || strcmp(a->last, "Hezka fotka") != 0) return 0;   // newest message is the image + caption
     if (!b->name || strcmp(b->name, "Parta") != 0) return 0;
     if (!b->last || strcmp(b->last, "Hi group") != 0) return 0;
-    // the per-conversation message history must be parsed too (one text message each, from the peer)
-    if (a->nmsgs != 1 || !a->msgs || !a->msgs[0].text || strcmp(a->msgs[0].text, "Ahoj, jak se mas?") != 0 ||
+    // Alice: a text then an image (oldest-first); check the per-message content + the image thumbnail.
+    if (a->nmsgs != 2 || !a->msgs) return 0;
+    if (a->msgs[0].kind != WA_MSG_TEXT || !a->msgs[0].text || strcmp(a->msgs[0].text, "Ahoj, jak se mas?") != 0 ||
         a->msgs[0].from_me != 0 || !a->msgs[0].id || strcmp(a->msgs[0].id, "ID1") != 0) return 0;
-    if (b->nmsgs != 1 || !b->msgs || !b->msgs[0].text || strcmp(b->msgs[0].text, "Hi group") != 0) return 0;
+    if (a->msgs[1].kind != WA_MSG_IMAGE || !a->msgs[1].text || strcmp(a->msgs[1].text, "Hezka fotka") != 0 ||
+        a->msgs[1].thumb_len != 6 || !a->msgs[1].thumb || a->msgs[1].thumb[0] != 0xFF || a->msgs[1].thumb[1] != 0xD8) return 0;
+    if (b->nmsgs != 1 || !b->msgs || b->msgs[0].kind != WA_MSG_TEXT || !b->msgs[0].text ||
+        strcmp(b->msgs[0].text, "Hi group") != 0) return 0;
     return 1;
 }
 

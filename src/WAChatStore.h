@@ -18,4 +18,7 @@ extern NSString *const WAChatStoreChanged;   // userInfo may carry @"jid" (canon
 // Record a message the user just sent (persist + notify).
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid;
 
+// A localized "📷 Photo"-style label for a media message kind (WA_MSG_*), shared by the list and the bubbles.
++ (NSString *)mediaLabelForKind:(int)kind;
+
 @end

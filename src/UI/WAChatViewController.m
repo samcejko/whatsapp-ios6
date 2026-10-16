@@ -4,10 +4,12 @@
 #import "../WACommon.h"
 #import "../WASession.h"
 #import "../WAChatStore.h"
+#import <QuartzCore/QuartzCore.h>
+#include "wa_history.h"   // WA_MSG_* kinds
 
 @interface WAChatViewController ()
 @property (nonatomic, copy) NSString *jid;
-@property (nonatomic, strong) NSMutableArray *messages;   // @{ @"text", @"out" }
+@property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional) }
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UIView *bar;
 @property (nonatomic, strong) UITextField *field;
@@ -88,12 +90,54 @@ static NSString *jidKey(NSString *jid)
     return d.length ? d : jid;
 }
 
-// Load this chat's history (and any live messages) from the persistent store, keeping the @{text,out} shape the cells use.
+static NSString *durationStr(unsigned int secs)
+{
+    return [NSString stringWithFormat:@"%u:%02u", secs / 60, secs % 60];
+}
+
+// The text shown in a bubble: the message text, or a media label (+ filename / duration / caption) for media.
+- (NSString *)displayTextFor:(NSDictionary *)m
+{
+    int kind = [m[@"kind"] intValue];
+    NSString *caption = m[@"text"];
+    if (kind == WA_MSG_TEXT) return caption.length ? caption : @"";
+
+    NSMutableString *s = [NSMutableString string];
+    if (kind == WA_MSG_DOCUMENT && [m[@"file"] length]) [s appendFormat:@"\U0001F4C4 %@", m[@"file"]];
+    else [s appendString:[WAChatStore mediaLabelForKind:kind]];
+    if ((kind == WA_MSG_AUDIO || kind == WA_MSG_VIDEO) && [m[@"dur"] unsignedIntValue] > 0)
+        [s appendFormat:@" · %@", durationStr([m[@"dur"] unsignedIntValue])];
+    if (caption.length) [s appendFormat:@"\n%@", caption];
+    return s;
+}
+
+// Load this chat's history (and any live messages) from the store: decode thumbnails and precompute the bubble text.
 - (void)loadMessages
 {
     [self.messages removeAllObjects];
-    for (NSDictionary *m in [[WAChatStore shared] messagesForJID:self.jid])
-        [self.messages addObject:@{ @"text": m[@"text"] ?: @"", @"out": m[@"out"] ?: @NO }];
+    for (NSDictionary *m in [[WAChatStore shared] messagesForJID:self.jid]) {
+        NSMutableDictionary *d = [NSMutableDictionary dictionary];
+        d[@"out"] = m[@"out"] ?: @NO;
+        d[@"kind"] = m[@"kind"] ?: @(WA_MSG_TEXT);
+        d[@"display"] = [self displayTextFor:m];
+        int kind = [m[@"kind"] intValue];
+        NSData *thumb = m[@"thumb"];
+        if ((kind == WA_MSG_IMAGE || kind == WA_MSG_VIDEO) && [thumb isKindOfClass:[NSData class]] && thumb.length) {
+            UIImage *img = [UIImage imageWithData:thumb];
+            if (img) d[@"image"] = img;
+        }
+        [self.messages addObject:d];
+    }
+}
+
+// The on-screen size of a message's thumbnail (CGSizeZero when there is none), scaled into the bubble width.
+- (CGSize)thumbSizeFor:(NSDictionary *)m
+{
+    UIImage *img = m[@"image"];
+    if (!img || img.size.width < 1 || img.size.height < 1) return CGSizeZero;
+    CGFloat maxW = MIN(self.view.bounds.size.width * 0.6, 220), maxH = 240;
+    CGFloat scale = MIN(MIN(maxW / img.size.width, maxH / img.size.height), 1.0);
+    return CGSizeMake(floorf(img.size.width * scale), floorf(img.size.height * scale));
 }
 
 - (void)onStoreChanged:(NSNotification *)n
@@ -168,12 +212,22 @@ static NSString *jidKey(NSString *jid)
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.messages.count; }
 
+// The text's drawn size inside a bubble of the given max content width.
+- (CGSize)textSize:(NSString *)text maxWidth:(CGFloat)maxW
+{
+    if (!text.length) return CGSizeZero;
+    return [text sizeWithFont:[UIFont systemFontOfSize:16]
+             constrainedToSize:CGSizeMake(maxW, 10000) lineBreakMode:NSLineBreakByWordWrapping];
+}
+
 - (CGFloat)tableView:(UITableView *)t heightForRowAtIndexPath:(NSIndexPath *)ip
 {
-    NSString *text = self.messages[ip.row][@"text"];
-    CGSize max = CGSizeMake(self.view.bounds.size.width * 0.72 - 24, 10000);
-    CGSize s = [text sizeWithFont:[UIFont systemFontOfSize:16] constrainedToSize:max lineBreakMode:NSLineBreakByWordWrapping];
-    return s.height + 26;
+    NSDictionary *m = self.messages[ip.row];
+    CGFloat maxW = self.view.bounds.size.width * 0.72 - 24;
+    CGSize thumb = [self thumbSizeFor:m];
+    CGSize ts = [self textSize:m[@"display"] maxWidth:maxW];
+    CGFloat h = thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
+    return MAX(h, 20) + 26;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip
@@ -187,21 +241,48 @@ static NSString *jidKey(NSString *jid)
     for (UIView *v in cell.contentView.subviews) [v removeFromSuperview];
     NSDictionary *m = self.messages[ip.row];
     BOOL out = [m[@"out"] boolValue];
-    NSString *text = m[@"text"];
-    CGFloat w = self.view.bounds.size.width;
-    CGSize max = CGSizeMake(w * 0.72 - 24, 10000);
-    CGSize ts = [text sizeWithFont:[UIFont systemFontOfSize:16] constrainedToSize:max lineBreakMode:NSLineBreakByWordWrapping];
-    CGFloat bw = ts.width + 24, bh = ts.height + 16;
+    NSString *text = m[@"display"];
+    CGFloat w = self.view.bounds.size.width, maxW = w * 0.72 - 24;
+
+    CGSize thumb = [self thumbSizeFor:m];
+    CGSize ts = [self textSize:text maxWidth:maxW];
+    CGFloat gap = (thumb.height > 0 && ts.height > 0) ? 6 : 0;
+    CGFloat contentW = MAX(thumb.width, ts.width);
+    CGFloat bw = contentW + 24, bh = thumb.height + gap + ts.height + 16;
     CGRect bf = out ? CGRectMake(w - bw - 8, 6, bw, bh) : CGRectMake(8, 6, bw, bh);
+
     UIImageView *bubble = [[UIImageView alloc] initWithImage:[WATheme bubbleOutgoing:out]];
     bubble.frame = bf;
     [cell.contentView addSubview:bubble];
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + 12, bf.origin.y + 7, ts.width + 2, ts.height)];
-    lbl.numberOfLines = 0;
-    lbl.backgroundColor = [UIColor clearColor];
-    lbl.font = [UIFont systemFontOfSize:16];
-    lbl.text = text;
-    [cell.contentView addSubview:lbl];
+
+    CGFloat y = bf.origin.y + 8;
+    UIImage *img = m[@"image"];
+    if (thumb.height > 0 && img) {
+        UIImageView *iv = [[UIImageView alloc] initWithImage:img];
+        iv.frame = CGRectMake(bf.origin.x + 12, y, thumb.width, thumb.height);
+        iv.contentMode = UIViewContentModeScaleAspectFill;
+        iv.clipsToBounds = YES;
+        iv.layer.cornerRadius = 4;
+        [cell.contentView addSubview:iv];
+        if ([m[@"kind"] intValue] == WA_MSG_VIDEO) {   // a play glyph over the video thumbnail
+            UILabel *play = [[UILabel alloc] initWithFrame:iv.frame];
+            play.text = @"▶";
+            play.font = [UIFont systemFontOfSize:40];
+            play.textColor = [UIColor colorWithWhite:1.0 alpha:0.9];
+            play.textAlignment = NSTextAlignmentCenter;
+            play.backgroundColor = [UIColor clearColor];
+            [cell.contentView addSubview:play];
+        }
+        y += thumb.height + gap;
+    }
+    if (ts.height > 0) {
+        UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + 12, y, ts.width + 2, ts.height)];
+        lbl.numberOfLines = 0;
+        lbl.backgroundColor = [UIColor clearColor];
+        lbl.font = [UIFont systemFontOfSize:16];
+        lbl.text = text;
+        [cell.contentView addSubview:lbl];
+    }
     return cell;
 }
 

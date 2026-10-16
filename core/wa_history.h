@@ -13,12 +13,29 @@
 extern "C" {
 #endif
 
-// One text message from a conversation's history. Strings are malloc'd (id may be NULL).
+// Message kinds surfaced from history (what the bubble should show).
+enum {
+    WA_MSG_TEXT = 0,
+    WA_MSG_IMAGE,
+    WA_MSG_VIDEO,
+    WA_MSG_AUDIO,       // voice note or audio clip
+    WA_MSG_DOCUMENT,
+    WA_MSG_STICKER,
+    WA_MSG_LOCATION,
+    WA_MSG_CONTACT,
+};
+
+// One message from a conversation's history. Strings/bytes are malloc'd (any may be NULL).
 typedef struct {
-    char *text;          // message text (conversation / extendedTextMessage)
+    char *text;          // text (WA_MSG_TEXT) or the media caption (may be NULL)
     char *id;            // message id (MessageKey.id), or NULL
     uint64_t timestamp;  // messageTimestamp (seconds)
     int from_me;         // 1 when we sent it (MessageKey.fromMe)
+    int kind;            // WA_MSG_*
+    uint8_t *thumb;      // inline JPEG thumbnail (image/video/document), or NULL
+    size_t thumb_len;
+    uint32_t duration;   // seconds (audio/video), else 0
+    char *filename;      // document file name, or NULL
 } wa_history_msg;
 
 // One conversation surfaced from a HistorySync chunk. The strings/arrays are malloc'd (name/last/msgs may be NULL)

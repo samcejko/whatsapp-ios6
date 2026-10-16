@@ -106,10 +106,18 @@ static void cb_node(void *ctx, const wa_node *node)
                 NSMutableArray *msgs = [NSMutableArray arrayWithCapacity:cv->nmsgs];
                 for (int j = 0; j < cv->nmsgs; j++) {
                     wa_history_msg *mm = &cv->msgs[j];
-                    NSString *mt = mm->text ? [NSString stringWithUTF8String:mm->text] : nil;
-                    if (!mt) continue;   // skip entries with invalid UTF-8
-                    [msgs addObject:@{ @"text": mt, @"out": @(mm->from_me != 0), @"ts": @(mm->timestamp),
-                                       @"id": (mm->id ? [NSString stringWithUTF8String:mm->id] : @"") ?: @"" }];
+                    NSString *mt = mm->text ? ([NSString stringWithUTF8String:mm->text] ?: @"") : @"";
+                    NSMutableDictionary *md = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                                               mt, @"text",
+                                               @(mm->from_me != 0), @"out",
+                                               @(mm->timestamp), @"ts",
+                                               @(mm->kind), @"kind", nil];
+                    NSString *mid = mm->id ? [NSString stringWithUTF8String:mm->id] : nil;
+                    if (mid) md[@"id"] = mid;
+                    if (mm->duration) md[@"dur"] = @(mm->duration);
+                    if (mm->filename) { NSString *fn = [NSString stringWithUTF8String:mm->filename]; if (fn) md[@"file"] = fn; }
+                    if (mm->thumb && mm->thumb_len) md[@"thumb"] = [NSData dataWithBytes:mm->thumb length:mm->thumb_len];
+                    [msgs addObject:md];
                 }
                 [convs addObject:@{ @"jid": jid,
                                     @"name": name ?: @"",

@@ -35,3 +35,10 @@
 "you" = "Ty";
 "typing" = "p\U00ed\U0161e\U2026";
 "reconnecting" = "Op\U011btovn\U00e9 p\U0159ipojov\U00e1n\U00ed\U2026";
+"media_photo" = "Fotka";
+"media_video" = "Video";
+"media_voice" = "Hlasov\U00e1 zpr\U00e1va";
+"media_document" = "Dokument";
+"media_sticker" = "N\U00e1lepka";
+"media_location" = "Poloha";
+"media_contact" = "Kontakt";
