@@ -52,3 +52,6 @@
 "send_failed_title" = "Message Not Sent";
 "send_failed_hint" = "WhatsApp server rejected outgoing message (protocol / LID sync issue). Receiving messages is unaffected.";
 "ok" = "OK";
+"downloading" = "Downloading\U2026";
+"download_failed" = "Failed to download file";
+

@@ -9,7 +9,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include "wa_history.h"   // WA_MSG_* kinds
 
-@interface WAChatViewController ()
+@interface WAChatViewController () <UIDocumentInteractionControllerDelegate>
 @property (nonatomic, copy) NSString *jid;
 @property (nonatomic) BOOL isGroup;
 @property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional), @"sender" }
@@ -18,6 +18,7 @@
 @property (nonatomic, strong) UITextField *field;
 @property (nonatomic, strong) UIButton *send;
 @property (nonatomic) CGFloat kbHeight;
+@property (nonatomic, strong) UIDocumentInteractionController *docController;
 @end
 
 @implementation WAChatViewController
@@ -446,14 +447,19 @@ static NSString *durationStr(unsigned int secs)
 {
     [t deselectRowAtIndexPath:ip animated:NO];
     NSDictionary *m = self.messages[ip.row];
-    if ([m[@"kind"] intValue] == WA_MSG_IMAGE && (m[@"image"] || m[@"dpath"])) {
+    int kind = [m[@"kind"] intValue];
+    if ((kind == WA_MSG_IMAGE || kind == WA_MSG_VIDEO) && (m[@"image"] || m[@"thumb"] || m[@"dpath"])) {
         WAMediaViewController *v = [[WAMediaViewController alloc] initWithMessage:m];
         v.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
         [self presentViewController:v animated:YES completion:nil];
         return;
     }
-    if ([m[@"kind"] intValue] == WA_MSG_AUDIO) {
+    if (kind == WA_MSG_AUDIO) {
         [[WAAudioPlayer shared] playOrToggleMessage:m];
+        return;
+    }
+    if (kind == WA_MSG_DOCUMENT) {
+        [self openDocumentMessage:m];
         return;
     }
     if ([m[@"out"] boolValue] && [m[@"status"] intValue] == WAMessageStatusError) {
@@ -465,6 +471,64 @@ static NSString *durationStr(unsigned int secs)
         [alert show];
         return;
     }
+}
+
+- (void)openDocumentMessage:(NSDictionary *)m
+{
+    NSString *mid = m[@"id"] ?: [NSString stringWithFormat:@"%llu", [m[@"ts"] unsignedLongLongValue]];
+    NSString *fn = m[@"file"];
+    if (!fn.length) fn = @"document.pdf";
+    NSString *docPath = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_doc_%@_%@", mid, fn]];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:docPath]) {
+        [self showDocumentAtURL:[NSURL fileURLWithPath:docPath]];
+        return;
+    }
+    NSString *dpath = m[@"dpath"];
+    NSData *mkey = m[@"mkey"];
+    NSData *esha = m[@"esha"];
+    if (![dpath isKindOfClass:[NSString class]] || ![mkey isKindOfClass:[NSData class]] || mkey.length != 32) {
+        return;
+    }
+    UIAlertView *av = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"downloading") delegate:nil cancelButtonTitle:nil otherButtonTitles:nil];
+    [av show];
+    const char *cdpath = strdup(dpath.UTF8String);
+    NSData *mk = mkey, *es = [esha isKindOfClass:[NSData class]] ? esha : nil;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        wa_buf out;
+        wa_buf_init(&out);
+        int rc = wa_media_download(cdpath, mk.bytes, es.length ? es.bytes : NULL, es.length, WA_MSG_DOCUMENT, NULL, &out);
+        free((void *)cdpath);
+        if (rc == 0 && out.len > 0) {
+            NSData *data = [NSData dataWithBytes:out.data length:out.len];
+            wa_buf_free(&out);
+            [data writeToFile:docPath atomically:YES];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [av dismissWithClickedButtonIndex:0 animated:YES];
+                [self showDocumentAtURL:[NSURL fileURLWithPath:docPath]];
+            });
+        } else {
+            wa_buf_free(&out);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [av dismissWithClickedButtonIndex:0 animated:YES];
+                UIAlertView *err = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"download_failed") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
+                [err show];
+            });
+        }
+    });
+}
+
+- (void)showDocumentAtURL:(NSURL *)url
+{
+    self.docController = [UIDocumentInteractionController interactionControllerWithURL:url];
+    self.docController.delegate = self;
+    if (![self.docController presentPreviewAnimated:YES]) {
+        [self.docController presentOpenInMenuFromRect:self.view.bounds inView:self.view animated:YES];
+    }
+}
+
+- (UIViewController *)documentInteractionControllerViewControllerForPreview:(UIDocumentInteractionController *)controller
+{
+    return self;
 }
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
