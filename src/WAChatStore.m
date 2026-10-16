@@ -84,8 +84,7 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
     if (!e && create) {
         e = [NSMutableDictionary dictionary];
         e[@"jid"] = jid ?: @"";
-        NSString *ab = WAAddressBookNameForNumber(key);
-        e[@"name"] = ab.length ? ab : @"";
+        e[@"name"] = WADisplayNameForChat(jid, nil);
         e[@"ts"] = @0;
         e[@"unread"] = @0;
         e[@"msgs"] = [NSMutableArray array];
@@ -153,7 +152,11 @@ static NSString *msgSig(NSDictionary *m)
         if (![jid isKindOfClass:[NSString class]] || !jid.length) continue;
         NSMutableDictionary *e = [self entryForJID:jid create:YES];
         NSString *name = c[@"name"];
-        if ([name isKindOfClass:[NSString class]] && name.length) e[@"name"] = name;
+        if ([name isKindOfClass:[NSString class]] && name.length && !WAIsRawNumberOrEmpty(name)) {
+            e[@"name"] = name;
+        } else if (![e[@"name"] length] || WAIsRawNumberOrEmpty(e[@"name"])) {
+            e[@"name"] = WADisplayNameForChat(jid, name);
+        }
         unsigned long long ts = [c[@"ts"] unsignedLongLongValue];
         if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
         if (c[@"unread"]) e[@"unread"] = c[@"unread"];
@@ -232,9 +235,8 @@ static NSString *msgSig(NSDictionary *m)
 {
     if (!jid.length) return;
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
-    if (![e[@"name"] length]) {
-        NSString *ab = WAAddressBookNameForNumber([self keyFor:jid]);
-        e[@"name"] = ab.length ? ab : ([jid componentsSeparatedByString:@"@"].firstObject ?: jid);
+    if (WAIsRawNumberOrEmpty(e[@"name"])) {
+        e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
     }
     unsigned long long ts = (unsigned long long)[[NSDate date] timeIntervalSince1970];
     NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
@@ -254,7 +256,7 @@ static NSString *msgSig(NSDictionary *m)
 - (void)appendText:(NSString *)text toJID:(NSString *)jid outgoing:(BOOL)out ts:(unsigned long long)ts msgId:(NSString *)mid status:(WAMessageStatus)status
 {
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
-    if (![e[@"name"] length]) e[@"name"] = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    if (WAIsRawNumberOrEmpty(e[@"name"])) e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
     NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
                               text, @"text",
                               @(out), @"out",
@@ -300,6 +302,51 @@ static NSString *msgSig(NSDictionary *m)
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
 }
 
+- (void)refreshContactNames
+{
+    WAReloadAddressBookCache();
+    BOOL changed = NO;
+    for (NSString *key in self.chats) {
+        NSMutableDictionary *e = self.chats[key];
+        NSString *jid = e[@"jid"];
+        NSString *currentName = e[@"name"];
+        NSString *push = e[@"pushName"];
+        NSString *resolved = nil;
+
+        NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+        NSString *ab = WAAddressBookNameForNumber(user);
+        if (ab.length) {
+            resolved = ab;
+        } else if (currentName.length && !WAIsRawNumberOrEmpty(currentName)) {
+            resolved = currentName;
+        } else if (push.length && !WAIsRawNumberOrEmpty(push)) {
+            resolved = push;
+        } else {
+            resolved = WADisplayNameForChat(jid, currentName);
+        }
+        if (resolved.length && ![resolved isEqualToString:currentName]) {
+            e[@"name"] = resolved;
+            changed = YES;
+        }
+    }
+    if (changed) {
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+    }
+}
+
+- (void)setPushName:(NSString *)pushName forJID:(NSString *)jid
+{
+    if (!pushName.length || !jid.length) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    e[@"pushName"] = pushName;
+    if (WAIsRawNumberOrEmpty(e[@"name"])) {
+        e[@"name"] = pushName;
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+    }
+}
+
 - (NSArray *)conversationsSorted
 {
     NSMutableArray *rows = [NSMutableArray arrayWithCapacity:self.chats.count];
@@ -308,9 +355,12 @@ static NSString *msgSig(NSDictionary *m)
         NSDictionary *lastMsg = [e[@"msgs"] lastObject];
         NSString *last = lastMsg ? [WAChatStore previewForMessage:lastMsg] : @"";
         NSString *name = e[@"name"];
-        if (!name.length) {
-            NSString *ab = WAAddressBookNameForNumber(k);
-            if (ab.length) name = ab;
+        if (WAIsRawNumberOrEmpty(name)) {
+            if ([e[@"pushName"] length] && !WAIsRawNumberOrEmpty(e[@"pushName"])) {
+                name = e[@"pushName"];
+            } else {
+                name = WADisplayNameForChat(e[@"jid"], name);
+            }
         }
         [rows addObject:@{ @"jid": e[@"jid"] ?: @"",
                            @"name": name ?: @"",

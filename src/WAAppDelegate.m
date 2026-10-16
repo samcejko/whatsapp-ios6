@@ -11,6 +11,7 @@
 #import "UI/WACallViewController.h"
 #import "WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
+#import <AddressBook/AddressBook.h>
 #include "wa_history.h"
 
 @implementation WAAppDelegate
@@ -25,6 +26,22 @@
 
     [WAChatStore shared];   // start observing history-sync + message notifications before the session connects
 
+    if (&ABAddressBookCreateWithOptions != NULL) {
+        CFErrorRef err = NULL;
+        ABAddressBookRef ab = ABAddressBookCreateWithOptions(NULL, &err);
+        if (ab) {
+            ABAddressBookRequestAccessWithCompletion(ab, ^(bool granted, CFErrorRef error) {
+                if (granted) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[WAChatStore shared] refreshContactNames];
+                    });
+                }
+            });
+            CFRelease(ab);
+        }
+    }
+    [[WAChatStore shared] refreshContactNames];
+
     if ([WASession shared].registered) [self showChats];
     else [self showPairing];
 
@@ -37,8 +54,7 @@
 {
     NSString *jid = n.userInfo[@"jid"];
     BOOL video = [n.userInfo[@"video"] boolValue];
-    NSString *key = [WAChatStore keyForJID:jid];
-    NSString *name = WAAddressBookNameForNumber(key) ?: [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    NSString *name = WADisplayNameForChat(jid, nil);
 
     if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
         UILocalNotification *notif = [[UILocalNotification alloc] init];
@@ -97,7 +113,7 @@
         if (jid.length && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
             UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
             [nav popToRootViewControllerAnimated:NO];
-            NSString *name = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+            NSString *name = WADisplayNameForChat(jid, nil);
             [nav pushViewController:[[WAChatViewController alloc] initWithJID:jid name:name] animated:NO];
             WALog(@"debug open: %@", jid);
         }
@@ -141,8 +157,13 @@
         }
         return YES;
     }
+    if ([cmd isEqualToString:@"refresh"]) {
+        [[WAChatStore shared] refreshContactNames];
+        WALog(@"debug refreshContactNames called");
+        return YES;
+    }
     if ([cmd isEqualToString:@"call"]) {
-        NSString *name = @"Test", *jid = nil;
+        NSString *name = nil, *jid = nil;
         BOOL video = NO, incoming = NO;
         for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
             NSArray *p = [kv componentsSeparatedByString:@"="];
@@ -154,6 +175,8 @@
                 else if ([k isEqualToString:@"incoming"]) incoming = [v boolValue];
             }
         }
+        if (!name.length && jid.length) name = WADisplayNameForChat(jid, nil);
+        if (!name.length) name = @"Test";
         WACallViewController *c = [[WACallViewController alloc] initWithJID:jid name:name video:video incoming:incoming];
         [self.window.rootViewController presentViewController:c animated:NO completion:nil];
         return YES;

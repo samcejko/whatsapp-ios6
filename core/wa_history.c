@@ -239,9 +239,13 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
             if (pb_get_varint(key, keyl, F_KEY_FROMME, &fm)) msg.from_me = fm ? 1 : 0;
             msg.id = pb_get_string(key, keyl, F_KEY_ID);
             if (!msg.from_me) {
-                // sender for group bubbles: the pushName, else the participant's number (before '@').
-                msg.sender = pb_get_string(wmi, wmil, F_WMI_PUSHNAME);
-                if (!msg.sender) {
+                char *push = pb_get_string(wmi, wmil, F_WMI_PUSHNAME);
+                if (push) {
+                    msg.sender = push;
+                    if (!out->name && !strstr(out->jid, "@g.us")) {
+                        out->name = strdup(push);
+                    }
+                } else {
                     char *part = pb_get_string(wmi, wmil, F_WMI_PARTICIPANT);
                     if (!part) part = pb_get_string(key, keyl, F_KEY_PARTICIPANT);
                     if (part) { char *at = strchr(part, '@'); if (at) *at = 0; msg.sender = part; }

@@ -43,7 +43,7 @@ wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_deven
 
 // Parse an incoming <message>: its from/id/type and the first <enc> (type + bytes). Returns 1 on success.
 typedef struct {
-    const char *from, *id, *type;
+    const char *from, *id, *type, *notify;
     const char *enc_type;        // "pkmsg" or "msg"
     const uint8_t *enc;
     size_t enc_len;

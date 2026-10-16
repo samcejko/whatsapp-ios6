@@ -31,7 +31,7 @@
     if ((self = [super init])) {
         _jid = [jid copy];
         _isGroup = [jid rangeOfString:@"@g.us"].location != NSNotFound;
-        self.title = name;
+        self.title = WADisplayNameForChat(jid, name);
         _messages = [NSMutableArray array];
     }
     return self;

@@ -60,5 +60,5 @@
 "choose_contact" = "Choose from Address Book";
 "enter_number" = "Enter Phone Number";
 "sending" = "Sending\U2026";
-
-
+"contact_whatsapp" = "WhatsApp Contact";
+"group_default" = "Group";

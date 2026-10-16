@@ -120,6 +120,7 @@ int wa_msg_parse_incoming(const wa_node *message, wa_msg_incoming *out)
     out->from = wa_node_get(message, "from");
     out->id = wa_node_get(message, "id");
     out->type = wa_node_get(message, "type");
+    out->notify = wa_node_get(message, "notify");
     out->enc_type = wa_node_get_or(enc, "type", "msg");
     out->enc = enc->content;
     out->enc_len = enc->content_len;

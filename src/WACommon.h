@@ -17,6 +17,14 @@ NSString *WAListTime(uint64_t ts);
 NSString *WADayLabel(uint64_t ts);
 // Resolve contact name from device address book by phone number / JID user part
 NSString *WAAddressBookNameForNumber(NSString *number);
+// Checks if a name string is nil, empty, or consists only of digits / phone symbols
+BOOL WAIsRawNumberOrEmpty(NSString *name);
+// Pretty-formats a raw phone number / JID (e.g. +420 773 047 722) or returns "WhatsApp kontakt" for LID
+NSString *WAFormatPhoneNumber(NSString *raw);
+// Unified display name resolver: saved name -> AddressBook -> WhatsApp contact / formatted phone number
+NSString *WADisplayNameForChat(NSString *jid, NSString *savedName);
+// Invalidate address book in-memory cache so it re-reads
+void WAReloadAddressBookCache(void);
 #ifdef __cplusplus
 }
 #endif

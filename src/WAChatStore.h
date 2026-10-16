@@ -38,6 +38,12 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Delete a conversation and its messages (persist + notify).
 - (void)deleteChat:(NSString *)jid;
 
+// Re-resolves contact names against AddressBook and push names, persists if changed.
+- (void)refreshContactNames;
+
+// Sets/updates the peer's WhatsApp pushName for a JID
+- (void)setPushName:(NSString *)pushName forJID:(NSString *)jid;
+
 // A localized "📷 Photo"-style label for a media message kind (WA_MSG_*), shared by the list and the bubbles.
 + (NSString *)mediaLabelForKind:(int)kind;
 

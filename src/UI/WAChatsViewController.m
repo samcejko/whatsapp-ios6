@@ -110,14 +110,9 @@
     [self refreshBanner:[WASession shared].state];
 }
 
-// A display name for a chat: the history/contact name when we have one, else address book or number before "@".
 - (NSString *)displayNameFor:(NSString *)jid name:(NSString *)name
 {
-    if (name.length) return name;
-    NSString *key = [WAChatStore keyForJID:jid];
-    NSString *ab = WAAddressBookNameForNumber(key);
-    if (ab.length) return ab;
-    return [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    return WADisplayNameForChat(jid, name);
 }
 
 // The active rows: filtered by the search query, else all chats.
@@ -301,7 +296,7 @@
     NSString *digits = [[num componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
     if (!digits.length) return;
     NSString *jid = [digits stringByAppendingString:@"@s.whatsapp.net"];
-    if (!name.length) name = WAAddressBookNameForNumber(digits) ?: num;
+    if (!name.length) name = WADisplayNameForChat(jid, nil);
     WAChatViewController *c = [[WAChatViewController alloc] initWithJID:jid name:name];
     [self.navigationController pushViewController:c animated:YES];
 }

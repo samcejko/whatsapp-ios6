@@ -95,6 +95,22 @@ static void cb_node(void *ctx, const wa_node *node)
     WASession *self = (__bridge WASession *)ctx;
 
     if (wa_node_tag_is(node, "message")) {
+        const char *notify = wa_node_get(node, "notify");
+        const char *raw_from = wa_node_get(node, "from");
+        const char *raw_part = wa_node_get(node, "participant");
+        if (notify && notify[0]) {
+            NSString *pName = [NSString stringWithUTF8String:notify];
+            const char *target = (raw_part && raw_part[0]) ? raw_part : raw_from;
+            if (target && target[0]) {
+                NSString *pJid = [NSString stringWithUTF8String:target];
+                if (pName.length && pJid.length) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[WAChatStore shared] setPushName:pName forJID:pJid];
+                    });
+                }
+            }
+        }
+
         char from[80] = { 0 };
         wa_history_result hist;
         int is_history = 0;

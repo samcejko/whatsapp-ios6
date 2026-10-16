@@ -14,5 +14,10 @@
 	     LaunchServices and the sandbox agree, or the system refuses its files and IOSurface. -->
 	<key>com.apple.private.security.container-required</key>
 	<string>com.samcejko.wazzup</string>
+	<key>com.apple.private.tcc.allow</key>
+	<array>
+		<string>kTCCServiceAddressBook</string>
+		<string>kTCCServicePhotos</string>
+	</array>
 </dict>
 </plist>
