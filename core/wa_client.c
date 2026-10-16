@@ -184,7 +184,8 @@ static int do_handshake(wa_client *c)
         if (r < 0) { set_err(c, "%s", wa_ws_error(c->ws)); wa_buf_free(&frame); return -1; }
         have = wa_noise_unframe(&c->inbuf, &frame) == 1;
     }
-    if (!have) { set_err(c, "no ServerHello"); wa_buf_free(&frame); return -1; }
+    if (!have) { set_err(c, "no ServerHello"); wa_log("handshake: no ServerHello"); wa_buf_free(&frame); return -1; }
+    wa_log("handshake: ServerHello %u bytes", (unsigned)frame.len);
 
     wa_buf payload, finish;
     wa_buf_init(&payload);
@@ -194,10 +195,12 @@ static int do_handshake(wa_client *c)
     if (wa_noise_finish(&hs, frame.data, frame.len, c->dev->noise_key.priv, c->dev->noise_key.pub,
                         payload.data, payload.len, &finish, err, sizeof err) != 0) {
         set_err(c, "%s", err);
+        wa_log("handshake: finish failed: %s", err);
         goto fail;
     }
     if (ws_send_noise(c, finish.data, finish.len, 0) != 0) { set_err(c, "cannot send ClientFinish"); goto fail; }
     wa_noise_split(&hs, &c->enc, &c->dec);
+    wa_log("handshake: done (payload %u bytes)", (unsigned)payload.len);
     memcpy(c->dev->server_static, hs.server_static, 32);
     c->dev->have_server_static = 1;
     wa_buf_free(&frame);
@@ -263,9 +266,10 @@ static void handle_pair_device(wa_client *c, const wa_node *iq, const wa_node *p
     c->cur_ref = 0;
     c->state = WA_PAIRING;
     c->next_qr_us = wa_now_us() + QR_ROTATE_MS * 1000ull;
+    wa_log("pair-device: %d ref(s)", c->nref);
     if (c->nref && c->cb.on_qr) {
         char *qr = wa_pair_qr_string(c->dev, c->refs[0], '1');
-        if (qr) { c->cb.on_qr(c->cb.ctx, qr); free(qr); }
+        if (qr) { wa_log("QR shown (%d bytes)", (int)strlen(qr)); c->cb.on_qr(c->cb.ctx, qr); free(qr); }
     }
 }
 
@@ -273,6 +277,7 @@ static void handle_pair_success(wa_client *c, const wa_node *iq, const wa_node *
 {
     const char *req_id = wa_node_get(iq, "id");
     wa_node *di = wa_node_child(ps, "device-identity");
+    wa_log("pair-success in (di=%s, %u bytes)", di ? "yes" : "no", (unsigned)(di ? di->content_len : 0));
     if (!di || !di->has_content) {
         wa_node *e = wa_node_new("iq");
         wa_node_attr(e, "to", "@s.whatsapp.net");
@@ -324,8 +329,9 @@ static void handle_pair_success(wa_client *c, const wa_node *iq, const wa_node *
     wa_node *outdi = wa_node_add_new(sign, "device-identity");
     wa_node_attrf(outdi, "key-index", "%u", key_index);
     wa_node_set_bytes(outdi, out, out_len);
-    wa_client_send(c, reply);
+    int srrc = wa_client_send(c, reply);
     wa_node_free(reply);
+    wa_log("pair-success: signed ok, key-index=%u, reply sent (rc=%d)", key_index, srrc);
 
     if (c->cb.on_device_changed) c->cb.on_device_changed(c->cb.ctx, c->dev);
     if (c->cb.on_paired) c->cb.on_paired(c->cb.ctx, c->dev->pn);
@@ -355,6 +361,7 @@ static int take_pending_iq(wa_client *c, const wa_node *node)
 
 static void dispatch(wa_client *c, const wa_node *node)
 {
+    wa_log("<- <%s> type=%s", node->tag, wa_node_get_or(node, "type", "-"));
     if (wa_node_tag_is(node, "iq")) {
         wa_node *pd = wa_node_child(node, "pair-device");
         wa_node *ps = wa_node_child(node, "pair-success");
@@ -365,15 +372,18 @@ static void dispatch(wa_client *c, const wa_node *node)
         c->state = WA_CONNECTED;
         const char *pn = wa_node_get(node, "lid");
         (void)pn;
+        wa_log("<- success: logged in");
         if (c->cb.on_connected) c->cb.on_connected(c->cb.ctx);
         return;
     } else if (wa_node_tag_is(node, "failure")) {
         const char *reason = wa_node_get_or(node, "reason", "login failure");
         set_err(c, "server rejected login: %s", reason);
+        wa_log("<- failure: reason=%s", reason);
         c->stop = 1;
         return;
     } else if (wa_node_tag_is(node, "stream:error") || wa_node_tag_is(node, "xmlstreamend")) {
         const char *code = wa_node_get_or(node, "code", "");
+        wa_log("<- stream:error code=%s", code);
         if (strcmp(code, "515") == 0 || c->reconnect_wanted) c->reconnect_wanted = 1;
         else set_err(c, "stream error %s", code);
         return;   // the read loop ends when the socket closes
