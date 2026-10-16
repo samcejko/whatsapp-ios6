@@ -1,5 +1,7 @@
 // Shared helpers for the Wazzup app (class prefix WA).
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 #define WALoc(key) NSLocalizedString(key, nil)
 

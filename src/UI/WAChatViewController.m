@@ -365,20 +365,7 @@
     if (dur >= 1.0) {
         // Record outgoing voice note in store
         NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
-        NSMutableDictionary *e = [[WAChatStore shared] entryForJID:self.jid create:YES];
-        unsigned long long ts = (unsigned long long)[[NSDate date] timeIntervalSince1970];
-        NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-                                  @"", @"text",
-                                  @YES, @"out",
-                                  @(ts), @"ts",
-                                  mid, @"id",
-                                  @(WA_MSG_AUDIO), @"kind",
-                                  @((uint32_t)ceil(dur)), @"duration",
-                                  @(WAMessageStatusSent), @"status", nil];
-        [[WAChatStore shared] mergeMessages:@[ m ] into:e];
-        e[@"ts"] = @(ts);
-        [[WAChatStore shared] save];
-        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [WAChatStore keyForJID:self.jid] }];
+        [[WAChatStore shared] recordOutgoingAudioDuration:(uint32_t)ceil(dur) toJID:self.jid msgId:mid status:WAMessageStatusSent];
         AudioServicesPlaySystemSound(1004);
     } else {
         [[NSFileManager defaultManager] removeItemAtPath:self.recordFilePath error:nil];

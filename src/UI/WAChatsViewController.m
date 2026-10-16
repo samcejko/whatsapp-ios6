@@ -79,7 +79,6 @@
 @property (nonatomic, strong) UILabel *empty;
 @property (nonatomic, strong) UILabel *banner;
 @property (nonatomic, strong) UISearchBar *searchBar;
-@property (nonatomic, strong) UISegmentedControl *navSegment;
 @property (nonatomic, strong) NSMutableArray *chats;      // all chats, newest-first
 @property (nonatomic, strong) NSMutableArray *filtered;   // search results
 @property (nonatomic, strong) NSMutableArray *callLogs;   // call history

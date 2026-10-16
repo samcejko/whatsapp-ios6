@@ -32,6 +32,7 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status quoted:(NSDictionary *)quoted;
 - (void)recordOutgoingMedia:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
+- (void)recordOutgoingAudioDuration:(uint32_t)dur toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
 
 // Update status of a message by id (e.g. pending -> sent -> delivered -> read)
 - (void)updateMessageStatus:(WAMessageStatus)status msgId:(NSString *)mid;

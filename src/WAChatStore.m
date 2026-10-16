@@ -301,6 +301,28 @@ static NSString *msgSig(NSDictionary *m)
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
 }
 
+- (void)recordOutgoingAudioDuration:(uint32_t)dur toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status
+{
+    if (!jid.length) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    if (WAIsRawNumberOrEmpty(e[@"name"])) {
+        e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
+    }
+    unsigned long long ts = (unsigned long long)[[NSDate date] timeIntervalSince1970];
+    NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                              @"", @"text",
+                              @YES, @"out",
+                              @(ts), @"ts",
+                              (mid ?: @""), @"id",
+                              @(WA_MSG_AUDIO), @"kind",
+                              @(dur), @"duration",
+                              @(status), @"status", nil];
+    [self mergeMessages:@[ m ] into:e];
+    if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+}
+
 - (void)appendText:(NSString *)text toJID:(NSString *)jid outgoing:(BOOL)out ts:(unsigned long long)ts msgId:(NSString *)mid status:(WAMessageStatus)status
 {
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
