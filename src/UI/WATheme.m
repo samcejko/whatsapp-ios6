@@ -114,9 +114,14 @@
     BOOL group = [jid rangeOfString:@"@g.us"].location != NSNotFound;
     NSString *initials = @"";
     if (!group) {
+        // Only real (letter) initials; a number-named chat gets the person glyph instead of a lone digit.
+        NSCharacterSet *letters = [NSCharacterSet letterCharacterSet];
         NSArray *parts = [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] componentsSeparatedByString:@" "];
         NSMutableString *ini = [NSMutableString string];
-        for (NSString *p in parts) { if (p.length && ini.length < 2) [ini appendString:[[p substringToIndex:1] uppercaseString]]; }
+        for (NSString *p in parts) {
+            if (p.length && ini.length < 2 && [letters characterIsMember:[p characterAtIndex:0]])
+                [ini appendString:[[p substringToIndex:1] uppercaseString]];
+        }
         initials = ini;
     }
 

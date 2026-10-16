@@ -36,7 +36,23 @@ typedef struct {
     size_t thumb_len;
     uint32_t duration;   // seconds (audio/video), else 0
     char *filename;      // document file name, or NULL
+    char *sender;        // sender display name/number (group messages; pushName or participant), or NULL
+    // media download reference (image/video/audio/document) so the full file can be fetched + decrypted on tap:
+    char *direct_path;   // CDN path, or NULL
+    uint8_t *media_key;  // 32 bytes, or NULL
+    size_t media_key_len;
+    uint8_t *enc_sha;    // fileEncSha256 (URL token), or NULL
+    size_t enc_sha_len;
 } wa_history_msg;
+
+// HKDF "app info" strings for WhatsApp media decryption, by kind (for full-media download). NULL for non-media.
+const char *wa_media_app_info(int kind);
+
+// Download a WhatsApp media file from the CDN and decrypt it (HKDF(media_key, app_info) -> iv/cipher/mac, verify the
+// trailing 10-byte HMAC over iv||ciphertext, AES-256-CBC). Appends the plaintext file to out. 0 or -1.
+// direct_path: the message's directPath; enc_sha: fileEncSha256 (URL token, may be NULL). No zlib (unlike history).
+int wa_media_download(const char *direct_path, const uint8_t *media_key, const uint8_t *enc_sha, size_t enc_sha_len,
+                      int kind, const char *ca_file, wa_buf *out);
 
 // One conversation surfaced from a HistorySync chunk. The strings/arrays are malloc'd (name/last/msgs may be NULL)
 // and owned by the wa_history_result; free the whole result with wa_history_result_free.

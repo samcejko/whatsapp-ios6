@@ -117,6 +117,10 @@ static void cb_node(void *ctx, const wa_node *node)
                     if (mm->duration) md[@"dur"] = @(mm->duration);
                     if (mm->filename) { NSString *fn = [NSString stringWithUTF8String:mm->filename]; if (fn) md[@"file"] = fn; }
                     if (mm->thumb && mm->thumb_len) md[@"thumb"] = [NSData dataWithBytes:mm->thumb length:mm->thumb_len];
+                    if (mm->sender) { NSString *sn = [NSString stringWithUTF8String:mm->sender]; if (sn.length) md[@"sender"] = sn; }
+                    if (mm->direct_path) { NSString *dp = [NSString stringWithUTF8String:mm->direct_path]; if (dp.length) md[@"dpath"] = dp; }
+                    if (mm->media_key && mm->media_key_len) md[@"mkey"] = [NSData dataWithBytes:mm->media_key length:mm->media_key_len];
+                    if (mm->enc_sha && mm->enc_sha_len) md[@"esha"] = [NSData dataWithBytes:mm->enc_sha length:mm->enc_sha_len];
                     [msgs addObject:md];
                 }
                 [convs addObject:@{ @"jid": jid,

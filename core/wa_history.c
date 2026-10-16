@@ -60,6 +60,22 @@
 #define F_DOC_FILENAME              8
 #define F_DOC_CAPTION              20
 #define F_CONTACT_DISPLAYNAME       1
+#define F_WMI_PARTICIPANT           5
+#define F_WMI_PUSHNAME             19
+#define F_KEY_PARTICIPANT           4
+// per-type media download refs (mediaKey, fileEncSha256, directPath):
+#define F_IMG_MEDIAKEY              8
+#define F_IMG_ENCSHA                9
+#define F_IMG_DIRECTPATH           11
+#define F_VID_MEDIAKEY              6
+#define F_VID_ENCSHA               11
+#define F_VID_DIRECTPATH           13
+#define F_AUD_MEDIAKEY              7
+#define F_AUD_ENCSHA                8
+#define F_AUD_DIRECTPATH            9
+#define F_DOC_MEDIAKEY              7
+#define F_DOC_ENCSHA                9
+#define F_DOC_DIRECTPATH           10
 
 #define HISTORY_MEDIA_HOST   "mmg.whatsapp.net"
 #define HISTORY_HKDF_INFO    "WhatsApp History Keys"
@@ -75,8 +91,28 @@ static void conv_free(wa_history_conv *c)
         free(c->msgs[i].id);
         free(c->msgs[i].thumb);
         free(c->msgs[i].filename);
+        free(c->msgs[i].sender);
+        free(c->msgs[i].direct_path);
+        free(c->msgs[i].media_key);
+        free(c->msgs[i].enc_sha);
     }
     free(c->msgs);
+}
+
+// Extract a media message's download refs (mediaKey/fileEncSha256/directPath) at the given field numbers.
+static void copy_dl_refs(const uint8_t *sub, size_t subl, uint32_t mk, uint32_t enc, uint32_t dp, wa_history_msg *m)
+{
+    const uint8_t *d;
+    size_t n;
+    if (pb_get_bytes(sub, subl, mk, &d, &n) && n == 32) {
+        m->media_key = (uint8_t *)malloc(32);
+        if (m->media_key) { memcpy(m->media_key, d, 32); m->media_key_len = 32; }
+    }
+    if (pb_get_bytes(sub, subl, enc, &d, &n) && n > 0) {
+        m->enc_sha = (uint8_t *)malloc(n);
+        if (m->enc_sha) { memcpy(m->enc_sha, d, n); m->enc_sha_len = n; }
+    }
+    m->direct_path = pb_get_string(sub, subl, dp);
 }
 
 // Copy a bytes field (e.g. jpegThumbnail) out of a sub-message into m->thumb.
@@ -104,17 +140,20 @@ static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_m
         m->kind = WA_MSG_IMAGE;
         m->text = pb_get_string(sub, subl, F_IMG_CAPTION);
         copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        copy_dl_refs(sub, subl, F_IMG_MEDIAKEY, F_IMG_ENCSHA, F_IMG_DIRECTPATH, m);
         return 1;
     }
     if (pb_get_bytes(inner, innerl, F_MSG_VIDEO, &sub, &subl)) {
         m->kind = WA_MSG_VIDEO;
         m->text = pb_get_string(sub, subl, F_VID_CAPTION);
         copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        copy_dl_refs(sub, subl, F_VID_MEDIAKEY, F_VID_ENCSHA, F_VID_DIRECTPATH, m);
         if (pb_get_varint(sub, subl, F_VID_SECONDS, &v)) m->duration = (uint32_t)v;
         return 1;
     }
     if (pb_get_bytes(inner, innerl, F_MSG_AUDIO, &sub, &subl)) {
         m->kind = WA_MSG_AUDIO;
+        copy_dl_refs(sub, subl, F_AUD_MEDIAKEY, F_AUD_ENCSHA, F_AUD_DIRECTPATH, m);
         if (pb_get_varint(sub, subl, F_AUD_SECONDS, &v)) m->duration = (uint32_t)v;
         return 1;
     }
@@ -124,6 +163,7 @@ static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_m
         if (!m->filename) m->filename = pb_get_string(sub, subl, F_DOC_TITLE);
         m->text = pb_get_string(sub, subl, F_DOC_CAPTION);
         copy_thumb(sub, subl, F_JPEG_THUMBNAIL, m);
+        copy_dl_refs(sub, subl, F_DOC_MEDIAKEY, F_DOC_ENCSHA, F_DOC_DIRECTPATH, m);
         return 1;
     }
     if (pb_get_bytes(inner, innerl, F_MSG_STICKER, &sub, &subl)) { m->kind = WA_MSG_STICKER; return 1; }
@@ -195,11 +235,21 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
             uint64_t fm = 0;
             if (pb_get_varint(key, keyl, F_KEY_FROMME, &fm)) msg.from_me = fm ? 1 : 0;
             msg.id = pb_get_string(key, keyl, F_KEY_ID);
+            if (!msg.from_me) {
+                // sender for group bubbles: the pushName, else the participant's number (before '@').
+                msg.sender = pb_get_string(wmi, wmil, F_WMI_PUSHNAME);
+                if (!msg.sender) {
+                    char *part = pb_get_string(wmi, wmil, F_WMI_PARTICIPANT);
+                    if (!part) part = pb_get_string(key, keyl, F_KEY_PARTICIPANT);
+                    if (part) { char *at = strchr(part, '@'); if (at) *at = 0; msg.sender = part; }
+                }
+            }
         }
         if (n >= mcap) {
             int ncap = mcap ? mcap * 2 : 16;
             wa_history_msg *p = (wa_history_msg *)realloc(msgs, (size_t)ncap * sizeof *p);
-            if (!p) { free(msg.text); free(msg.id); free(msg.thumb); free(msg.filename); break; }
+            if (!p) { free(msg.text); free(msg.id); free(msg.thumb); free(msg.filename);
+                      free(msg.sender); free(msg.direct_path); free(msg.media_key); free(msg.enc_sha); break; }
             msgs = p;
             mcap = ncap;
         }
@@ -255,32 +305,43 @@ int wa_history_parse_compressed(const uint8_t *in, size_t len, wa_history_result
     return rc;
 }
 
-int wa_history_media_decrypt(const uint8_t *blob, size_t blob_len, const uint8_t media_key[32], wa_buf *out)
+// Generic WhatsApp media decrypt: HKDF(media_key, info) -> iv/cipher/mac, verify the trailing 10-byte HMAC over
+// iv||ciphertext, AES-256-CBC. Appends plaintext to out. 0 or -1.
+static int media_decrypt_info(const uint8_t *blob, size_t blob_len, const uint8_t *media_key, const char *info, wa_buf *out)
 {
     if (blob_len <= MEDIA_MAC_SIZE) return -1;
     uint8_t expanded[112];
-    if (wa_hkdf_sha256(NULL, 0, media_key, 32, HISTORY_HKDF_INFO, strlen(HISTORY_HKDF_INFO), expanded, sizeof expanded) != 0)
-        return -1;
-    const uint8_t *iv = expanded;
-    const uint8_t *cipher_key = expanded + 16;
-    const uint8_t *mac_key = expanded + 48;
+    if (wa_hkdf_sha256(NULL, 0, media_key, 32, info, strlen(info), expanded, sizeof expanded) != 0) return -1;
+    const uint8_t *iv = expanded, *cipher_key = expanded + 16, *mac_key = expanded + 48;
     size_t ct_len = blob_len - MEDIA_MAC_SIZE;
-
-    // HMAC-SHA256(mac_key, iv || ciphertext); the first 10 bytes must equal the blob's trailing 10.
     const void *parts[2] = { iv, blob };
     size_t lens[2] = { 16, ct_len };
     uint8_t mac[32];
     wa_hmac_sha256_v(mac_key, 32, 2, parts, lens, mac);
-    if (wa_ct_compare(mac, blob + ct_len, MEDIA_MAC_SIZE) != 0) { wa_log("history: media MAC mismatch"); return -1; }
-
+    if (wa_ct_compare(mac, blob + ct_len, MEDIA_MAC_SIZE) != 0) { wa_log("media: MAC mismatch"); return -1; }
     return wa_aes_cbc_decrypt(cipher_key, iv, blob, ct_len, out);
 }
 
-// Download the external history blob from the media CDN and media-decrypt it into `compressed`. 0 or -1.
-static int download_history_blob(const char *direct_path, const uint8_t *enc_sha, size_t enc_sha_len,
-                                 const uint8_t media_key[32], const char *ca_file, wa_buf *compressed)
+int wa_history_media_decrypt(const uint8_t *blob, size_t blob_len, const uint8_t media_key[32], wa_buf *out)
 {
-    // token = base64url-no-pad(fileEncSha256); appended to directPath's query.
+    return media_decrypt_info(blob, blob_len, media_key, HISTORY_HKDF_INFO, out);
+}
+
+const char *wa_media_app_info(int kind)
+{
+    switch (kind) {
+        case WA_MSG_IMAGE:    return "WhatsApp Image Keys";
+        case WA_MSG_VIDEO:    return "WhatsApp Video Keys";
+        case WA_MSG_AUDIO:    return "WhatsApp Audio Keys";
+        case WA_MSG_DOCUMENT: return "WhatsApp Document Keys";
+        default:              return NULL;
+    }
+}
+
+// Fetch the raw encrypted blob for a directPath from the media CDN (token = base64url(fileEncSha256)). 0 or -1.
+static int fetch_media_blob(const char *direct_path, const uint8_t *enc_sha, size_t enc_sha_len,
+                            const char *ca_file, uint8_t **blob, size_t *blob_len)
+{
     char tok[64] = { 0 };
     if (enc_sha && enc_sha_len) {
         size_t n = wa_base64_encode(enc_sha, enc_sha_len, tok, sizeof tok);
@@ -291,18 +352,36 @@ static int download_history_blob(const char *direct_path, const uint8_t *enc_sha
         ? wa_sprintf("%s%ctoken=%s", direct_path, strchr(direct_path, '?') ? '&' : '?', tok)
         : wa_strdup(direct_path);
     if (!path) return -1;
-
     int status = 0;
-    size_t blob_len = 0;
-    uint8_t *blob = wa_https_get_bin(HISTORY_MEDIA_HOST, path, ca_file, 30000, &status, &blob_len);
+    *blob = wa_https_get_bin(HISTORY_MEDIA_HOST, path, ca_file, 30000, &status, blob_len);
     free(path);
-    if (!blob || status != 200) {
-        wa_log("history: blob download failed (HTTP %d, %zu bytes)", status, blob_len);
-        free(blob);
-        return -1;
-    }
+    if (!*blob || status != 200) { wa_log("media: download failed (HTTP %d)", status); free(*blob); *blob = NULL; return -1; }
+    return 0;
+}
+
+// Download the external history blob from the media CDN and media-decrypt it into `compressed`. 0 or -1.
+static int download_history_blob(const char *direct_path, const uint8_t *enc_sha, size_t enc_sha_len,
+                                 const uint8_t media_key[32], const char *ca_file, wa_buf *compressed)
+{
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    if (fetch_media_blob(direct_path, enc_sha, enc_sha_len, ca_file, &blob, &blob_len) != 0) return -1;
     wa_log("history: downloaded blob %zu bytes, decrypting", blob_len);
     int rc = wa_history_media_decrypt(blob, blob_len, media_key, compressed);
+    free(blob);
+    return rc;
+}
+
+int wa_media_download(const char *direct_path, const uint8_t *media_key, const uint8_t *enc_sha, size_t enc_sha_len,
+                      int kind, const char *ca_file, wa_buf *out)
+{
+    const char *info = wa_media_app_info(kind);
+    if (!info || !direct_path || !media_key) return -1;
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    if (fetch_media_blob(direct_path, enc_sha, enc_sha_len, ca_file, &blob, &blob_len) != 0) return -1;
+    wa_log("media: downloaded %zu bytes (%s), decrypting", blob_len, info);
+    int rc = media_decrypt_info(blob, blob_len, media_key, info, out);
     free(blob);
     return rc;
 }

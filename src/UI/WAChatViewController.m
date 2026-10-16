@@ -1,5 +1,6 @@
 #import "WAChatViewController.h"
 #import "WACallViewController.h"
+#import "WAMediaViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
@@ -9,7 +10,8 @@
 
 @interface WAChatViewController ()
 @property (nonatomic, copy) NSString *jid;
-@property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional) }
+@property (nonatomic) BOOL isGroup;
+@property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional), @"sender" }
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UIView *bar;
 @property (nonatomic, strong) UITextField *field;
@@ -23,6 +25,7 @@
 {
     if ((self = [super init])) {
         _jid = [jid copy];
+        _isGroup = [jid rangeOfString:@"@g.us"].location != NSNotFound;
         self.title = name;
         _messages = [NSMutableArray array];
     }
@@ -50,7 +53,7 @@
     self.table.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.allowsSelection = NO;
+    self.table.allowsSelection = YES;   // tapping an image row opens the full-screen viewer
     [self.view addSubview:self.table];
 
     self.bar = [[UIView alloc] init];
@@ -121,6 +124,9 @@ static NSString *durationStr(unsigned int secs)
         d[@"kind"] = m[@"kind"] ?: @(WA_MSG_TEXT);
         d[@"ts"] = m[@"ts"] ?: @0;
         d[@"display"] = [self displayTextFor:m];
+        if (self.isGroup && ![m[@"out"] boolValue] && [m[@"sender"] length]) d[@"sender"] = m[@"sender"];
+        // carry media refs for the full-screen viewer
+        for (NSString *k in @[ @"thumb", @"dpath", @"mkey", @"esha" ]) if (m[k]) d[k] = m[k];
         int kind = [m[@"kind"] intValue];
         NSData *thumb = m[@"thumb"];
         if ((kind == WA_MSG_IMAGE || kind == WA_MSG_VIDEO) && [thumb isKindOfClass:[NSData class]] && thumb.length) {
@@ -227,7 +233,8 @@ static NSString *durationStr(unsigned int secs)
     CGFloat maxW = self.view.bounds.size.width * 0.72 - 24;
     CGSize thumb = [self thumbSizeFor:m];
     CGSize ts = [self textSize:m[@"display"] maxWidth:maxW];
-    CGFloat contentH = thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
+    CGFloat senderH = [m[@"sender"] length] ? 16 : 0;
+    CGFloat contentH = senderH + thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
     return MAX(contentH, 18) + 14 + 16;   // content + time row + vertical padding
 }
 
@@ -238,6 +245,7 @@ static NSString *durationStr(unsigned int secs)
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"b"];
         cell.backgroundColor = [UIColor clearColor];
         cell.contentView.backgroundColor = [UIColor clearColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
     for (UIView *v in cell.contentView.subviews) [v removeFromSuperview];
     NSDictionary *m = self.messages[ip.row];
@@ -245,6 +253,8 @@ static NSString *durationStr(unsigned int secs)
     NSString *text = m[@"display"];
     CGFloat w = self.view.bounds.size.width, maxW = w * 0.72 - 24;
 
+    NSString *sender = m[@"sender"];
+    CGFloat senderH = sender.length ? 16 : 0;
     CGSize thumb = [self thumbSizeFor:m];
     CGSize ts = [self textSize:text maxWidth:maxW];
     CGFloat gap = (thumb.height > 0 && ts.height > 0) ? 6 : 0;
@@ -254,10 +264,11 @@ static NSString *durationStr(unsigned int secs)
     if (out && timeStr.length) timeStr = [timeStr stringByAppendingString:@" ✓✓"];
     UIFont *timeFont = [UIFont systemFontOfSize:11];
     CGFloat timeW = timeStr.length ? [timeStr sizeWithFont:timeFont].width : 0;
+    CGFloat senderW = sender.length ? [sender sizeWithFont:[UIFont boldSystemFontOfSize:13]].width : 0;
 
-    CGFloat contentW = MAX(MAX(thumb.width, ts.width), timeW);
-    CGFloat contentH = thumb.height + gap + ts.height;
-    CGFloat bw = contentW + 24, bh = contentH + 14 + 14;
+    CGFloat contentW = MAX(MAX(MAX(thumb.width, ts.width), timeW), senderW);
+    CGFloat contentH = senderH + thumb.height + gap + ts.height;
+    CGFloat bw = MIN(contentW + 24, w * 0.78), bh = contentH + 14 + 14;
     CGRect bf = out ? CGRectMake(w - bw - 8, 5, bw, bh) : CGRectMake(8, 5, bw, bh);
 
     UIImageView *bubble = [[UIImageView alloc] initWithImage:[WATheme bubbleOutgoing:out]];
@@ -265,6 +276,15 @@ static NSString *durationStr(unsigned int secs)
     [cell.contentView addSubview:bubble];
 
     CGFloat y = bf.origin.y + 7;
+    if (sender.length) {
+        UILabel *sl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + 12, y, bw - 24, 15)];
+        sl.font = [UIFont boldSystemFontOfSize:13];
+        sl.backgroundColor = [UIColor clearColor];
+        sl.textColor = [WATheme accent];
+        sl.text = sender;
+        [cell.contentView addSubview:sl];
+        y += senderH;
+    }
     UIImage *img = m[@"image"];
     if (thumb.height > 0 && img) {
         UIImageView *iv = [[UIImageView alloc] initWithImage:img];
@@ -302,6 +322,17 @@ static NSString *durationStr(unsigned int secs)
         [cell.contentView addSubview:tl];
     }
     return cell;
+}
+
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip
+{
+    [t deselectRowAtIndexPath:ip animated:NO];
+    NSDictionary *m = self.messages[ip.row];
+    if ([m[@"kind"] intValue] == WA_MSG_IMAGE && (m[@"image"] || m[@"dpath"])) {
+        WAMediaViewController *v = [[WAMediaViewController alloc] initWithMessage:m];
+        v.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+        [self presentViewController:v animated:YES completion:nil];
+    }
 }
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }

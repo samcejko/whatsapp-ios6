@@ -1,5 +1,6 @@
 #import "WAChatsViewController.h"
 #import "WAChatViewController.h"
+#import "WASettingsViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
@@ -65,7 +66,7 @@
     self.view.backgroundColor = [UIColor whiteColor];
 
     self.navigationItem.leftBarButtonItem =
-        [[UIBarButtonItem alloc] initWithTitle:WALoc(@"unlink") style:UIBarButtonItemStylePlain target:self action:@selector(unlink)];
+        [[UIBarButtonItem alloc] initWithTitle:WALoc(@"settings") style:UIBarButtonItemStylePlain target:self action:@selector(openSettings)];
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newChat)];
 
@@ -142,21 +143,14 @@
 
 - (void)onState:(NSNotification *)n { [self refreshBanner:[n.userInfo[@"state"] integerValue]]; }
 
-- (void)unlink
+- (void)openSettings
 {
-    UIAlertView *a = [[UIAlertView alloc] initWithTitle:WALoc(@"app_name") message:WALoc(@"unlink_confirm")
-                                               delegate:self cancelButtonTitle:WALoc(@"cancel") otherButtonTitles:WALoc(@"unlink"), nil];
-    a.tag = 1;
-    [a show];
+    [self.navigationController pushViewController:[[WASettingsViewController alloc] init] animated:YES];
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-    if (alertView.tag == 1 && buttonIndex == 1) {
-        [[WASession shared] unlinkAndReset];
-        WAAppDelegate *ad = (WAAppDelegate *)[UIApplication sharedApplication].delegate;
-        [ad showPairing];
-    } else if (alertView.tag == 2 && buttonIndex == 1) {
+    if (alertView.tag == 2 && buttonIndex == 1) {
         UITextField *tf = [alertView textFieldAtIndex:0];
         NSString *num = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
         if (num.length) [self openChatWithNumber:num];
