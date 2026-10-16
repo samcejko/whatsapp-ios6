@@ -598,7 +598,7 @@ static NSString *durationStr(unsigned int secs)
 
     self.selectedMsg = m;
     NSString *preview = m[@"display"];
-    if (preview.length > 30) preview = [[preview substringToIndex:30] stringByAppendingString:@"\U2026"];
+    if (preview.length > 30) preview = [[preview substringToIndex:30] stringByAppendingString:@"..."];
 
     UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:(preview.length ? preview : nil)
                                                     delegate:self
