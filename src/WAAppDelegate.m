@@ -9,6 +9,7 @@
 #import "UI/WASettingsViewController.h"
 #import "UI/WAMediaViewController.h"
 #import "UI/WACallViewController.h"
+#import "UI/WAContactInfoViewController.h"
 #import "WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
 #import <AddressBook/AddressBook.h>
@@ -124,6 +125,19 @@
         [nav popToRootViewControllerAnimated:NO];
         [nav pushViewController:[[WASettingsViewController alloc] init] animated:NO];
         return YES;
+    }
+    if ([cmd isEqualToString:@"info"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"]) jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (jid.length) {
+            UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+            NSString *name = WADisplayNameForChat(jid, nil);
+            [nav pushViewController:[[WAContactInfoViewController alloc] initWithJID:jid name:name] animated:NO];
+            return YES;
+        }
     }
     if ([cmd isEqualToString:@"photo"]) {
         NSString *jid = nil;
