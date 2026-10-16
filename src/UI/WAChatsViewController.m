@@ -16,8 +16,8 @@
 @property (nonatomic, strong) UILabel *lastLbl;
 @property (nonatomic, strong) UILabel *timeLbl;
 @property (nonatomic, strong) UIImageView *badge;
-@property (nonatomic, strong) UILabel *pinLbl;
-@property (nonatomic, strong) UILabel *muteLbl;
+@property (nonatomic, strong) UIImageView *pinView;
+@property (nonatomic, strong) UIImageView *muteView;
 @end
 
 @implementation WAChatCell
@@ -36,21 +36,17 @@
         _timeLbl.textAlignment = NSTextAlignmentRight;
         _badge = [[UIImageView alloc] init];
 
-        _pinLbl = [[UILabel alloc] init];
-        _pinLbl.font = [UIFont systemFontOfSize:14];
-        _pinLbl.text = @"📌";
-        _pinLbl.backgroundColor = [UIColor clearColor];
-        _pinLbl.textAlignment = NSTextAlignmentCenter;
-        _pinLbl.hidden = YES;
+        _pinView = [[UIImageView alloc] init];
+        _pinView.image = [WATheme pinIconWithColor:[UIColor colorWithRed:0.78 green:0.25 blue:0.2 alpha:1.0] size:CGSizeMake(14, 14)];
+        _pinView.contentMode = UIViewContentModeCenter;
+        _pinView.hidden = YES;
 
-        _muteLbl = [[UILabel alloc] init];
-        _muteLbl.font = [UIFont systemFontOfSize:14];
-        _muteLbl.text = @"🔕";
-        _muteLbl.backgroundColor = [UIColor clearColor];
-        _muteLbl.textAlignment = NSTextAlignmentCenter;
-        _muteLbl.hidden = YES;
+        _muteView = [[UIImageView alloc] init];
+        _muteView.image = [WATheme muteIconWithColor:[UIColor colorWithWhite:0.55 alpha:1.0] size:CGSizeMake(15, 14)];
+        _muteView.contentMode = UIViewContentModeCenter;
+        _muteView.hidden = YES;
 
-        for (UIView *v in @[ _avatar, _nameLbl, _lastLbl, _timeLbl, _badge, _pinLbl, _muteLbl ]) [self.contentView addSubview:v];
+        for (UIView *v in @[ _avatar, _nameLbl, _lastLbl, _timeLbl, _badge, _pinView, _muteView ]) [self.contentView addSubview:v];
     }
     return self;
 }
@@ -60,20 +56,20 @@
     CGFloat w = self.contentView.bounds.size.width, h = self.contentView.bounds.size.height, av = 52;
     _avatar.frame = CGRectMake(10, (h - av) / 2, av, av);
     CGFloat lx = 10 + av + 12, rx = w - 12, tw = 70;
-    CGFloat pinW = _pinLbl.hidden ? 0 : 24;
-    CGFloat muteW = _muteLbl.hidden ? 0 : 24;
+    CGFloat pinW = _pinView.hidden ? 0 : 16;
+    CGFloat muteW = _muteView.hidden ? 0 : 18;
 
     _timeLbl.frame = CGRectMake(rx - tw, 14, tw, 16);
     _nameLbl.frame = CGRectMake(lx, 14, rx - tw - lx - 4 - pinW, 22);
-    if (!_pinLbl.hidden) {
-        _pinLbl.frame = CGRectMake(rx - tw - pinW, 14, pinW, 20);
+    if (!_pinView.hidden) {
+        _pinView.frame = CGRectMake(rx - tw - pinW, 16, pinW, 16);
     }
     CGSize bs = _badge.image ? _badge.image.size : CGSizeZero;
     _badge.frame = CGRectMake(rx - bs.width, h - 16 - bs.height, bs.width, bs.height);
     CGFloat rightIcons = (bs.width > 0 ? bs.width + 6 : 0) + (muteW > 0 ? muteW + 6 : 0);
     _lastLbl.frame = CGRectMake(lx, 39, rx - lx - rightIcons, 18);
-    if (!_muteLbl.hidden) {
-        _muteLbl.frame = CGRectMake(rx - (bs.width > 0 ? bs.width + 6 : 0) - muteW, 37, muteW, 20);
+    if (!_muteView.hidden) {
+        _muteView.frame = CGRectMake(rx - (bs.width > 0 ? bs.width + 6 : 0) - muteW, 40, muteW, 16);
     }
 }
 @end
@@ -508,8 +504,8 @@
     NSInteger unread = [chat[@"unread"] integerValue];
     cell.badge.image = unread > 0 ? [WATheme badgeWithCount:unread] : nil;
 
-    cell.pinLbl.hidden = ![chat[@"pinned"] boolValue];
-    cell.muteLbl.hidden = ![chat[@"muted"] boolValue];
+    cell.pinView.hidden = ![chat[@"pinned"] boolValue];
+    cell.muteView.hidden = ![chat[@"muted"] boolValue];
 
     NSString *jid = chat[@"jid"];
     if (jid.length) {

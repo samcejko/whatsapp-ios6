@@ -156,14 +156,17 @@
         UITableViewCellStyle style = (indexPath.section == 1 || indexPath.section == 2) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
         cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:cellId];
     }
+    cell.imageView.image = nil;
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = [NSString stringWithFormat:@"☎  %@", WALoc(@"call_voice")];
+            cell.textLabel.text = WALoc(@"call_voice");
             cell.textLabel.textColor = [WATheme accent];
+            cell.imageView.image = [WATheme callIconWithColor:[WATheme accent] size:CGSizeMake(20, 20)];
         } else {
-            cell.textLabel.text = [NSString stringWithFormat:@"▶  %@", WALoc(@"call_video")];
+            cell.textLabel.text = WALoc(@"call_video");
             cell.textLabel.textColor = [WATheme accent];
+            cell.imageView.image = [WATheme videoCallIconWithColor:[WATheme accent] size:CGSizeMake(20, 20)];
         }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.section == 1) {
@@ -184,7 +187,8 @@
             cell.selectionStyle = UITableViewCellSelectionStyleBlue;
         } else {
             NSUInteger starCount = [[WAChatStore shared] starredMessagesForJID:self.jid].count;
-            cell.textLabel.text = [NSString stringWithFormat:@"★  %@", WALoc(@"starred_messages")];
+            cell.textLabel.text = WALoc(@"starred_messages");
+            cell.imageView.image = [WATheme starIconWithColor:[UIColor colorWithRed:0.95 green:0.75 blue:0.1 alpha:1.0] size:CGSizeMake(18, 18)];
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)starCount];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             cell.accessoryType = UITableViewCellAccessoryNone;

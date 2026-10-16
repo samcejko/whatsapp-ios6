@@ -345,13 +345,13 @@ static NSString *msgSig(NSDictionary *m)
 + (NSString *)mediaLabelForKind:(int)kind
 {
     switch (kind) {
-        case WA_MSG_IMAGE:    return [@"\U0001F4F7 " stringByAppendingString:WALoc(@"media_photo")];
-        case WA_MSG_VIDEO:    return [@"\U0001F3AC " stringByAppendingString:WALoc(@"media_video")];
-        case WA_MSG_AUDIO:    return [@"\U0001F3A4 " stringByAppendingString:WALoc(@"media_voice")];
-        case WA_MSG_DOCUMENT: return [@"\U0001F4C4 " stringByAppendingString:WALoc(@"media_document")];
+        case WA_MSG_IMAGE:    return WALoc(@"media_photo");
+        case WA_MSG_VIDEO:    return WALoc(@"media_video");
+        case WA_MSG_AUDIO:    return WALoc(@"media_voice");
+        case WA_MSG_DOCUMENT: return WALoc(@"media_document");
         case WA_MSG_STICKER:  return WALoc(@"media_sticker");
-        case WA_MSG_LOCATION: return [@"\U0001F4CD " stringByAppendingString:WALoc(@"media_location")];
-        case WA_MSG_CONTACT:  return [@"\U0001F464 " stringByAppendingString:WALoc(@"media_contact")];
+        case WA_MSG_LOCATION: return WALoc(@"media_location");
+        case WA_MSG_CONTACT:  return WALoc(@"media_contact");
         default:              return @"";
     }
 }

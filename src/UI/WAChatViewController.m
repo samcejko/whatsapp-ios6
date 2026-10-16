@@ -72,12 +72,12 @@
 
     // Nav Bar Buttons: Search, Video Call, Voice Call
     UIButton *call = [UIButton buttonWithType:UIButtonTypeCustom];
-    [call setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 glyph:@"☎"] forState:UIControlStateNormal];
+    [call setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 type:WACallButtonTypeVoice] forState:UIControlStateNormal];
     call.frame = CGRectMake(0, 0, 30, 30);
     [call addTarget:self action:@selector(voiceCall) forControlEvents:UIControlEventTouchUpInside];
 
     UIButton *video = [UIButton buttonWithType:UIButtonTypeCustom];
-    [video setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 glyph:@"▶"] forState:UIControlStateNormal];
+    [video setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 type:WACallButtonTypeVideo] forState:UIControlStateNormal];
     video.frame = CGRectMake(0, 0, 30, 30);
     [video addTarget:self action:@selector(videoCall) forControlEvents:UIControlEventTouchUpInside];
 
@@ -92,9 +92,16 @@
     tv.userInteractionEnabled = YES;
     [tv addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openContactInfo)]];
 
-    self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 180, 20)];
     BOOL isEphemeral = [[WAChatStore shared] ephemeralDurationForChat:self.jid] > 0;
-    self.titleLabel.text = isEphemeral ? [NSString stringWithFormat:@"⏱ %@", self.title] : self.title;
+    if (isEphemeral) {
+        UIImageView *clock = [[UIImageView alloc] initWithFrame:CGRectMake(12, 8, 12, 12)];
+        clock.image = [WATheme clockIconWithColor:[UIColor colorWithWhite:0.95 alpha:1.0] size:CGSizeMake(12, 12)];
+        [tv addSubview:clock];
+        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(28, 4, 140, 20)];
+    } else {
+        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 180, 20)];
+    }
+    self.titleLabel.text = self.title;
     self.titleLabel.font = [UIFont boldSystemFontOfSize:17];
     self.titleLabel.textColor = [UIColor whiteColor];
     self.titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -188,9 +195,8 @@
 
     // Microphone button for voice notes
     self.micBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    [self.micBtn setTitle:@"🎤" forState:UIControlStateNormal];
+    [self.micBtn setImage:[WATheme microphoneIconWithColor:[UIColor whiteColor] size:CGSizeMake(18, 20)] forState:UIControlStateNormal];
     [self.micBtn setBackgroundImage:[WATheme glossyButtonWithColor:[WATheme accent]] forState:UIControlStateNormal];
-    self.micBtn.titleLabel.font = [UIFont systemFontOfSize:18];
     [self.micBtn addTarget:self action:@selector(micTouchDown) forControlEvents:UIControlEventTouchDown];
     [self.micBtn addTarget:self action:@selector(micTouchUpInside) forControlEvents:UIControlEventTouchUpInside];
     [self.micBtn addTarget:self action:@selector(micTouchUpOutside) forControlEvents:UIControlEventTouchUpOutside];
