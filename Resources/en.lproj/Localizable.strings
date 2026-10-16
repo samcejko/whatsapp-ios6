@@ -49,3 +49,6 @@
 "settings" = "Settings";
 "profile" = "Profile";
 "save_to_photos" = "Save to Photos";
+"send_failed_title" = "Message Not Sent";
+"send_failed_hint" = "WhatsApp server rejected outgoing message (protocol / LID sync issue). Receiving messages is unaffected.";
+"ok" = "OK";

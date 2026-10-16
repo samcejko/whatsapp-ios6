@@ -16,6 +16,11 @@ extern "C" {
 // encrypts per device, sends the fanned-out <message>. Returns 0 (reached >=1 recipient device) or -1.
 int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text);
 
+// Same as wa_chat_send_text, but accepts a pre-generated message id (or generates one if NULL).
+// If out_msg_id is non-NULL, copies the used id (up to out_msg_id_cap).
+int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text,
+                             const char *msg_id, char *out_msg_id, size_t out_msg_id_cap);
+
 // Decrypt an incoming <message> and route it. Writes the sender's bare JID into frombuf (>=80).
 //  - A peer history-sync notification: parses it into *hist, sends the hist_sync receipt, sets *is_history=1 and
 //    returns NULL. (When a notification is present but could not be parsed the receipt is still sent, *is_history

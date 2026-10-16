@@ -25,6 +25,16 @@ enum {
     WA_MSG_CONTACT,
 };
 
+// Message status codes (matches WebMessageInfo.Status enum)
+enum {
+    WA_STATUS_ERROR = 0,
+    WA_STATUS_PENDING = 1,
+    WA_STATUS_SERVER_ACK = 2,
+    WA_STATUS_DELIVERY_ACK = 3,
+    WA_STATUS_READ = 4,
+    WA_STATUS_PLAYED = 5,
+};
+
 // One message from a conversation's history. Strings/bytes are malloc'd (any may be NULL).
 typedef struct {
     char *text;          // text (WA_MSG_TEXT) or the media caption (may be NULL)
@@ -32,6 +42,7 @@ typedef struct {
     uint64_t timestamp;  // messageTimestamp (seconds)
     int from_me;         // 1 when we sent it (MessageKey.fromMe)
     int kind;            // WA_MSG_*
+    int status;          // WA_STATUS_*
     uint8_t *thumb;      // inline JPEG thumbnail (image/video/document), or NULL
     size_t thumb_len;
     uint32_t duration;   // seconds (audio/video), else 0

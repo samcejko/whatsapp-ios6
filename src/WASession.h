@@ -7,6 +7,7 @@ extern NSString *const WASessionQRChanged;       // userInfo: @"qr" (NSString)
 extern NSString *const WASessionPaired;          // userInfo: @"jid"
 extern NSString *const WASessionNodeReceived;    // userInfo: @"xml" (NSString, debug render)
 extern NSString *const WASessionMessage;         // userInfo: @"from" (bare JID), @"text"
+extern NSString *const WASessionMessageStatus;   // userInfo: @"id" (NSString), @"status" (NSNumber), @"error" (NSString, optional)
 extern NSString *const WASessionConversations;   // userInfo: @"conversations" (NSArray of @{jid,name,last,ts,unread}) from a history-sync chunk
 
 typedef NS_ENUM(NSInteger, WASessionState) {
@@ -32,6 +33,7 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 
 // Send a 1:1 text to a bare user JID ("<num>@s.whatsapp.net"). Runs on the client thread.
 - (void)sendText:(NSString *)text toJID:(NSString *)jid;
+- (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid;
 // Place a 1:1 call to a bare user JID. Sends the encrypted <offer>; the media comes up on the client thread.
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video;
 

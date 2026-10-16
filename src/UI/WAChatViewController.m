@@ -132,6 +132,8 @@ static NSString *durationStr(unsigned int secs)
         d[@"out"] = m[@"out"] ?: @NO;
         d[@"kind"] = m[@"kind"] ?: @(WA_MSG_TEXT);
         d[@"ts"] = m[@"ts"] ?: @0;
+        d[@"status"] = m[@"status"] ?: ([m[@"out"] boolValue] ? @(WAMessageStatusDelivered) : @0);
+        if ([m[@"id"] length]) d[@"id"] = m[@"id"];
         d[@"display"] = [self displayTextFor:m];
         if (self.isGroup && ![m[@"out"] boolValue] && [m[@"sender"] length]) d[@"sender"] = m[@"sender"];
         // carry media refs for the full-screen viewer
@@ -196,9 +198,10 @@ static NSString *durationStr(unsigned int secs)
     NSString *text = [self.field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!text.length) return;
     self.field.text = @"";
-    [[WAChatStore shared] recordOutgoing:text toJID:self.jid];   // persists + posts WAChatStoreChanged -> reloads the bubbles
-    [[WASession shared] sendText:text toJID:self.jid];
-    WALog(@"send to %@: %lu chars", self.jid, (unsigned long)text.length);
+    NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+    [[WAChatStore shared] recordOutgoing:text toJID:self.jid msgId:mid status:WAMessageStatusPending];
+    [[WASession shared] sendText:text toJID:self.jid msgId:mid];
+    WALog(@"send to %@ [%@]: %lu chars", self.jid, mid, (unsigned long)text.length);
 }
 
 - (void)scrollToBottom
@@ -285,14 +288,49 @@ static NSString *durationStr(unsigned int secs)
     CGSize ts = [self textSize:text maxWidth:maxW];
     CGFloat gap = (thumb.height > 0 && ts.height > 0) ? 6 : 0;
 
-    // time (+ a sent tick for outgoing) shown small at the bubble's bottom-right
+    // time (+ sent tick for outgoing) shown small at the bubble's bottom-right
     NSString *timeStr = WAClockTime([m[@"ts"] unsignedLongLongValue]);
-    if (out && timeStr.length) timeStr = [timeStr stringByAppendingString:@" ✓✓"];
     UIFont *timeFont = [UIFont systemFontOfSize:11];
     CGFloat timeW = timeStr.length ? [timeStr sizeWithFont:timeFont].width : 0;
+
+    NSString *statusGlyph = @"";
+    UIColor *statusColor = nil;
+    if (out) {
+        int st = [m[@"status"] intValue];
+        switch (st) {
+            case WAMessageStatusError:
+                statusGlyph = @" ⚠️";
+                statusColor = [UIColor colorWithRed:0.85 green:0.15 blue:0.15 alpha:1.0];
+                break;
+            case WAMessageStatusPending:
+                statusGlyph = @" 🕓";
+                statusColor = [UIColor colorWithRed:0.35 green:0.55 blue:0.3 alpha:0.8];
+                break;
+            case WAMessageStatusSent:
+                statusGlyph = @" ✓";
+                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                break;
+            case WAMessageStatusDelivered:
+                statusGlyph = @" ✓✓";
+                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                break;
+            case WAMessageStatusRead:
+            case WAMessageStatusPlayed:
+                statusGlyph = @" ✓✓";
+                statusColor = [UIColor colorWithRed:0.20 green:0.60 blue:0.86 alpha:1.0];
+                break;
+            default:
+                statusGlyph = @" ✓✓";
+                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                break;
+        }
+    }
+    UIFont *statusFont = [UIFont systemFontOfSize:11];
+    CGFloat statusW = statusGlyph.length ? [statusGlyph sizeWithFont:statusFont].width : 0;
+    CGFloat bottomRowW = timeW + statusW;
     CGFloat senderW = sender.length ? [sender sizeWithFont:[UIFont boldSystemFontOfSize:13]].width : 0;
 
-    CGFloat contentW = MAX(MAX(MAX(thumb.width, ts.width), timeW), senderW);
+    CGFloat contentW = MAX(MAX(MAX(thumb.width, ts.width), bottomRowW), senderW);
     CGFloat contentH = senderH + thumb.height + gap + ts.height;
     CGFloat bw = MIN(contentW + 24, w * 0.78), bh = contentH + 14 + 14;
     CGRect bf = out ? CGRectMake(w - bw - 8, 5, bw, bh) : CGRectMake(8, 5, bw, bh);
@@ -340,12 +378,20 @@ static NSString *durationStr(unsigned int secs)
         [cell.contentView addSubview:lbl];
     }
     if (timeStr.length) {
-        UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - timeW, bf.origin.y + bh - 16, timeW + 1, 13)];
+        UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - bottomRowW, bf.origin.y + bh - 16, timeW + 1, 13)];
         tl.font = timeFont;
         tl.backgroundColor = [UIColor clearColor];
         tl.textColor = out ? [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0] : [UIColor colorWithWhite:0.55 alpha:1.0];
         tl.text = timeStr;
         [cell.contentView addSubview:tl];
+    }
+    if (statusGlyph.length) {
+        UILabel *stl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - statusW, bf.origin.y + bh - 16, statusW + 1, 13)];
+        stl.font = statusFont;
+        stl.backgroundColor = [UIColor clearColor];
+        stl.textColor = statusColor;
+        stl.text = statusGlyph;
+        [cell.contentView addSubview:stl];
     }
     return cell;
 }
@@ -373,6 +419,16 @@ static NSString *durationStr(unsigned int secs)
         WAMediaViewController *v = [[WAMediaViewController alloc] initWithMessage:m];
         v.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
         [self presentViewController:v animated:YES completion:nil];
+        return;
+    }
+    if ([m[@"out"] boolValue] && [m[@"status"] intValue] == WAMessageStatusError) {
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:WALoc(@"send_failed_title")
+                                                        message:WALoc(@"send_failed_hint")
+                                                       delegate:nil
+                                              cancelButtonTitle:WALoc(@"ok")
+                                              otherButtonTitles:nil];
+        [alert show];
+        return;
     }
 }
 

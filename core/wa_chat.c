@@ -73,7 +73,8 @@ static int resolve_devices(wa_client *c, const char *user_jid, wa_device_list *o
     return rc;
 }
 
-int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text)
+int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text,
+                             const char *msg_id, char *out_msg_id, size_t out_msg_id_cap)
 {
     wa_jid tj;
     if (wa_jid_parse(to_user_jid, &tj) != 0) return -1;
@@ -127,8 +128,10 @@ int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user
 
     int rc = -1;
     if (reached_recipient) {
-        char id_str[24];
-        wa_client_next_id(c, id_str, sizeof id_str);
+        char id_str[40];
+        if (msg_id && msg_id[0]) snprintf(id_str, sizeof id_str, "%s", msg_id);
+        else wa_client_next_id(c, id_str, sizeof id_str);
+        if (out_msg_id && out_msg_id_cap) snprintf(out_msg_id, out_msg_id_cap, "%s", id_str);
         wa_device *d = wa_client_device(c);
         wa_node *msg = wa_msg_build_dm(to_user_jid, id_str, devs, ndevs,
                                        any_pkmsg ? d->account : NULL, any_pkmsg ? d->account_len : 0);
@@ -137,6 +140,11 @@ int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user
     }
     for (int i = 0; i < ndevs; i++) wa_buf_free(&encbufs[i]);
     return rc;
+}
+
+int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text)
+{
+    return wa_chat_send_text_with_id(c, sessions, to_user_jid, text, NULL, NULL, 0);
 }
 
 // Acknowledge a delivered history-sync chunk: <receipt to="<own pn>" id="<msg id>" type="hist_sync"/>. Without this

@@ -39,6 +39,7 @@
 #define F_WMI_KEY                    1
 #define F_WMI_MESSAGE               2
 #define F_WMI_MESSAGETIMESTAMP      3
+#define F_WMI_STATUS                4
 #define F_KEY_FROMME                2
 #define F_KEY_ID                    3
 // Message media sub-message fields:
@@ -229,6 +230,8 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
         memset(&msg, 0, sizeof msg);
         if (!extract_msg_content(inner, innerl, &msg)) continue;   // not a displayable message
         pb_get_varint(wmi, wmil, F_WMI_MESSAGETIMESTAMP, &msg.timestamp);
+        uint64_t msg_st = 0;
+        if (pb_get_varint(wmi, wmil, F_WMI_STATUS, &msg_st)) msg.status = (int)msg_st;
         const uint8_t *key;
         size_t keyl;
         if (pb_get_bytes(wmi, wmil, F_WMI_KEY, &key, &keyl)) {

@@ -6,6 +6,15 @@
 
 extern NSString *const WAChatStoreChanged;   // userInfo may carry @"jid" (canonical) when a single chat changed
 
+typedef NS_ENUM(NSInteger, WAMessageStatus) {
+    WAMessageStatusError = 0,
+    WAMessageStatusPending = 1,
+    WAMessageStatusSent = 2,
+    WAMessageStatusDelivered = 3,
+    WAMessageStatusRead = 4,
+    WAMessageStatusPlayed = 5,
+};
+
 @interface WAChatStore : NSObject
 
 + (instancetype)shared;
@@ -17,6 +26,10 @@ extern NSString *const WAChatStoreChanged;   // userInfo may carry @"jid" (canon
 
 // Record a message the user just sent (persist + notify).
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid;
+- (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
+
+// Update status of a message by id (e.g. pending -> sent -> delivered -> read)
+- (void)updateMessageStatus:(WAMessageStatus)status msgId:(NSString *)mid;
 
 // Delete a conversation and its messages (persist + notify).
 - (void)deleteChat:(NSString *)jid;

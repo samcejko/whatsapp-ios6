@@ -49,3 +49,6 @@
 "settings" = "Nastaven\U00ed";
 "profile" = "Profil";
 "save_to_photos" = "Ulo\U017eit do Fotek";
+"send_failed_title" = "Zpr\U00e1vu se nepoda\U0159ilo odeslat";
+"send_failed_hint" = "Server WhatsApp odm\U00edtl odesl\U00e1n\U00ed zpr\U00e1vy (chyba protokolu / LID). P\U0159\U00edchoz\U00ed zpr\U00e1vy funguj\U00ed.";
+"ok" = "OK";

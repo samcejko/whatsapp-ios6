@@ -13,6 +13,7 @@ NSString *const WASessionQRChanged = @"WASessionQRChanged";
 NSString *const WASessionPaired = @"WASessionPaired";
 NSString *const WASessionNodeReceived = @"WASessionNodeReceived";
 NSString *const WASessionMessage = @"WASessionMessage";
+NSString *const WASessionMessageStatus = @"WASessionMessageStatus";
 NSString *const WASessionConversations = @"WASessionConversations";
 
 @interface WASession () {
@@ -112,6 +113,9 @@ static void cb_node(void *ctx, const wa_node *node)
                                                @(mm->from_me != 0), @"out",
                                                @(mm->timestamp), @"ts",
                                                @(mm->kind), @"kind", nil];
+                    int st = mm->status;
+                    if (mm->from_me && st == 0) st = WA_STATUS_DELIVERY_ACK;
+                    md[@"status"] = @(st);
                     NSString *mid = mm->id ? [NSString stringWithUTF8String:mm->id] : nil;
                     if (mid) md[@"id"] = mid;
                     if (mm->duration) md[@"dur"] = @(mm->duration);
@@ -154,6 +158,63 @@ static void cb_node(void *ctx, const wa_node *node)
             WALog(@"incoming call from %s (video=%d, key %s)", st.peer, st.video, st.active ? "ok" : "missing");
         }
         return;
+    }
+    if (wa_node_tag_is(node, "ack")) {
+        const char *cls = wa_node_get(node, "class");
+        if (cls && strcmp(cls, "message") == 0) {
+            const char *aid = wa_node_get(node, "id");
+            const char *err = wa_node_get(node, "error");
+            if (aid && aid[0]) {
+                NSString *mid = [NSString stringWithUTF8String:aid];
+                int st = err ? WA_STATUS_ERROR : WA_STATUS_SERVER_ACK;
+                NSString *errStr = err ? [NSString stringWithUTF8String:err] : nil;
+                if (mid) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        NSMutableDictionary *ui = [NSMutableDictionary dictionaryWithObjectsAndKeys:mid, @"id", @(st), @"status", nil];
+                        if (errStr) ui[@"error"] = errStr;
+                        [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus object:self userInfo:ui];
+                    });
+                }
+            }
+        }
+    }
+    if (wa_node_tag_is(node, "receipt")) {
+        send_ack(self, node, "receipt");
+        const char *rtype = wa_node_get(node, "type");
+        int st = WA_STATUS_DELIVERY_ACK;
+        if (rtype) {
+            if (strcmp(rtype, "read") == 0 || strcmp(rtype, "read-self") == 0) st = WA_STATUS_READ;
+            else if (strcmp(rtype, "played") == 0 || strcmp(rtype, "played-self") == 0) st = WA_STATUS_PLAYED;
+            else if (strcmp(rtype, "hist_sync") == 0) st = -1;
+        }
+        if (st >= 0) {
+            const char *rid = wa_node_get(node, "id");
+            if (rid && rid[0]) {
+                NSString *mid = [NSString stringWithUTF8String:rid];
+                if (mid) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus object:self userInfo:@{ @"id": mid, @"status": @(st) }];
+                    });
+                }
+            }
+            for (int i = 0; i < node->nchildren; i++) {
+                const wa_node *child = node->children[i];
+                if (wa_node_tag_is(child, "list")) {
+                    for (int j = 0; j < child->nchildren; j++) {
+                        const wa_node *item = child->children[j];
+                        const char *iid = wa_node_get(item, "id");
+                        if (iid && iid[0]) {
+                            NSString *mid = [NSString stringWithUTF8String:iid];
+                            if (mid) {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus object:self userInfo:@{ @"id": mid, @"status": @(st) }];
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     char *s = wa_node_to_string(node, 0);
@@ -271,14 +332,33 @@ static void cb_device_changed(void *ctx, wa_device *d)
 
 // --- actions that run on the client thread ---
 
-typedef struct { void *session; char jid[80]; char text[4096]; int video; } wa_action_ctx;
+typedef struct {
+    void *session;
+    char jid[80];
+    char text[4096];
+    char mid[64];
+    int video;
+} wa_action_ctx;
 
 static void action_send_text(wa_client *c, void *ctx)
 {
     wa_action_ctx *a = (wa_action_ctx *)ctx;
     WASession *self = (__bridge WASession *)a->session;
-    if (wa_chat_send_text(c, self->_sessions, a->jid, a->text) == 0)
+    char used_id[64] = {0};
+    int rc = wa_chat_send_text_with_id(c, self->_sessions, a->jid, a->text, a->mid[0] ? a->mid : NULL, used_id, sizeof used_id);
+    if (rc == 0) {
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+    } else {
+        const char *fid = a->mid[0] ? a->mid : used_id;
+        if (fid[0]) {
+            NSString *mid = [NSString stringWithUTF8String:fid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_ERROR), @"error": @"send_failed" }];
+            });
+        }
+    }
     free(a);
 }
 
@@ -294,12 +374,27 @@ static void action_place_call(wa_client *c, void *ctx)
 
 - (void)sendText:(NSString *)text toJID:(NSString *)jid
 {
+    [self sendText:text toJID:jid msgId:nil];
+}
+
+- (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid
+{
     if (!_client || !jid.length) return;
     wa_action_ctx *a = (wa_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
     snprintf(a->text, sizeof a->text, "%s", text.UTF8String ?: "");
-    if (wa_client_post(_client, action_send_text, a) != 0) free(a);
+    if (mid.length) snprintf(a->mid, sizeof a->mid, "%s", mid.UTF8String);
+    if (wa_client_post(_client, action_send_text, a) != 0) {
+        if (mid.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_ERROR), @"error": @"post_failed" }];
+            });
+        }
+        free(a);
+    }
 }
 
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video

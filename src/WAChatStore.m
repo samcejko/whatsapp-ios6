@@ -28,6 +28,7 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
         NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
         [nc addObserver:self selector:@selector(onConversations:) name:WASessionConversations object:nil];
         [nc addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
+        [nc addObserver:self selector:@selector(onMessageStatus:) name:WASessionMessageStatus object:nil];
     }
     return self;
 }
@@ -54,7 +55,13 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
         if (![c isKindOfClass:[NSDictionary class]]) continue;
         NSMutableDictionary *entry = [c mutableCopy];
         NSArray *msgs = c[@"msgs"];
-        entry[@"msgs"] = [([msgs isKindOfClass:[NSArray class]] ? msgs : @[]) mutableCopy];
+        NSMutableArray *mutMsgs = [NSMutableArray array];
+        if ([msgs isKindOfClass:[NSArray class]]) {
+            for (id m in msgs) {
+                if ([m isKindOfClass:[NSDictionary class]]) [mutMsgs addObject:[m mutableCopy]];
+            }
+        }
+        entry[@"msgs"] = mutMsgs;
         self.chats[k] = entry;
     }
 }
@@ -89,7 +96,7 @@ static NSString *msgSig(NSDictionary *m)
     return [NSString stringWithFormat:@"%@|%@|%@", m[@"ts"] ?: @0, m[@"out"] ?: @NO, m[@"text"] ?: @""];
 }
 
-// Merge a batch of messages (dicts @{text,out,ts,id}) into a chat entry, de-duplicating and keeping oldest-first.
+// Merge a batch of messages into a chat entry, de-duplicating and keeping oldest-first.
 - (void)mergeMessages:(NSArray *)incoming into:(NSMutableDictionary *)entry
 {
     NSMutableArray *msgs = entry[@"msgs"];
@@ -98,9 +105,26 @@ static NSString *msgSig(NSDictionary *m)
     BOOL added = NO;
     for (NSDictionary *m in incoming) {
         NSString *sig = msgSig(m);
-        if ([seen containsObject:sig]) continue;
+        if ([seen containsObject:sig]) {
+            NSString *mid = m[@"id"];
+            if ([mid isKindOfClass:[NSString class]] && mid.length && m[@"status"]) {
+                for (NSMutableDictionary *existing in msgs) {
+                    if ([existing[@"id"] isEqualToString:mid]) {
+                        int cur = [existing[@"status"] intValue];
+                        int inc = [m[@"status"] intValue];
+                        if (inc == WAMessageStatusError || inc > cur) {
+                            existing[@"status"] = @(inc);
+                            added = YES;
+                        }
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
         [seen addObject:sig];
-        [msgs addObject:m];
+        NSMutableDictionary *mut = [m isKindOfClass:[NSMutableDictionary class]] ? m : [m mutableCopy];
+        [msgs addObject:mut];
         added = YES;
     }
     if (added) {
@@ -144,20 +168,71 @@ static NSString *msgSig(NSDictionary *m)
     NSString *from = n.userInfo[@"from"];
     NSString *text = n.userInfo[@"text"];
     if (![from isKindOfClass:[NSString class]] || !from.length) return;
-    [self appendText:(text ?: @"") toJID:from outgoing:NO ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:nil];
+    [self appendText:(text ?: @"") toJID:from outgoing:NO ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:nil status:WAMessageStatusDelivered];
+}
+
+- (void)onMessageStatus:(NSNotification *)n
+{
+    NSString *mid = n.userInfo[@"id"];
+    NSNumber *stNum = n.userInfo[@"status"];
+    if (![mid isKindOfClass:[NSString class]] || !mid.length || !stNum) return;
+    [self updateMessageStatus:[stNum integerValue] msgId:mid];
+}
+
+- (void)updateMessageStatus:(WAMessageStatus)status msgId:(NSString *)mid
+{
+    if (!mid.length) return;
+    BOOL changed = NO;
+    NSString *changedKey = nil;
+    for (NSString *key in self.chats) {
+        NSMutableDictionary *e = self.chats[key];
+        NSMutableArray *msgs = e[@"msgs"];
+        for (int i = (int)msgs.count - 1; i >= 0; i--) {
+            id mObj = msgs[i];
+            if (![mObj isKindOfClass:[NSDictionary class]]) continue;
+            NSString *mId = mObj[@"id"];
+            if ([mId isEqualToString:mid]) {
+                NSMutableDictionary *m = [mObj isKindOfClass:[NSMutableDictionary class]] ? mObj : [mObj mutableCopy];
+                int cur = [m[@"status"] intValue];
+                if (status == WAMessageStatusError || status > cur) {
+                    m[@"status"] = @(status);
+                    msgs[i] = m;
+                    changed = YES;
+                    changedKey = key;
+                }
+                break;
+            }
+        }
+        if (changed) break;
+    }
+    if (changed) {
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:changedKey ? @{ @"jid": changedKey } : nil];
+    }
 }
 
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid
 {
-    if (!jid.length) return;
-    [self appendText:(text ?: @"") toJID:jid outgoing:YES ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:nil];
+    [self recordOutgoing:text toJID:jid msgId:nil status:WAMessageStatusSent];
 }
 
-- (void)appendText:(NSString *)text toJID:(NSString *)jid outgoing:(BOOL)out ts:(unsigned long long)ts msgId:(NSString *)mid
+- (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status
+{
+    if (!jid.length) return;
+    [self appendText:(text ?: @"") toJID:jid outgoing:YES ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:mid status:status];
+}
+
+- (void)appendText:(NSString *)text toJID:(NSString *)jid outgoing:(BOOL)out ts:(unsigned long long)ts msgId:(NSString *)mid status:(WAMessageStatus)status
 {
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
     if (![e[@"name"] length]) e[@"name"] = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
-    NSDictionary *m = @{ @"text": text, @"out": @(out), @"ts": @(ts), @"id": (mid ?: @""), @"kind": @(WA_MSG_TEXT) };
+    NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                              text, @"text",
+                              @(out), @"out",
+                              @(ts), @"ts",
+                              (mid ?: @""), @"id",
+                              @(WA_MSG_TEXT), @"kind",
+                              @(status), @"status", nil];
     [self mergeMessages:@[ m ] into:e];
     if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
     [self save];
