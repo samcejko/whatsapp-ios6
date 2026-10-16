@@ -34,6 +34,14 @@ char *wa_https_get(const char *host, const char *path, const char *ca_file, int 
 // Binary-safe HTTPS GET (for media blobs, which contain NULs). Returns the body (malloc'd, *outlen bytes) or NULL.
 uint8_t *wa_https_get_bin(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status, size_t *outlen);
 
+// HTTPS POST (for media uploads).
+char *wa_https_post(const char *host, const char *path, const char *ca_file,
+                    const uint8_t *body, size_t body_len, const char *content_type,
+                    int timeout_ms, int *status);
+uint8_t *wa_https_post_bin(const char *host, const char *path, const char *ca_file,
+                           const uint8_t *body, size_t body_len, const char *content_type,
+                           int timeout_ms, int *status, size_t *outlen);
+
 #ifdef __cplusplus
 }
 #endif

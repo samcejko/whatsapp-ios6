@@ -125,6 +125,18 @@
     [self scrollToBottom];
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [[WAChatStore shared] markRead:self.jid];
+    NSArray *msgs = [[WAChatStore shared] messagesForJID:self.jid];
+    for (NSDictionary *m in msgs) {
+        if (![m[@"out"] boolValue] && m[@"id"]) {
+            [[WASession shared] sendReadReceiptForMessage:m[@"id"] toJID:self.jid participant:m[@"sender"]];
+        }
+    }
+}
+
 - (void)viewWillDisappear:(BOOL)animated
 {
     [super viewWillDisappear:animated];
@@ -291,7 +303,18 @@ static NSString *durationStr(unsigned int secs)
     UIImage *orig = info[UIImagePickerControllerOriginalImage];
     if (orig) {
         CGSize sz = orig.size;
-        CGFloat maxD = 240.0;
+        // Full resolution image for network transmission (capped at 1280x1280)
+        CGFloat fullMax = 1280.0;
+        CGFloat fullScale = (sz.width > fullMax || sz.height > fullMax) ? MIN(fullMax / sz.width, fullMax / sz.height) : 1.0;
+        CGSize fullSz = CGSizeMake(floorf(sz.width * fullScale), floorf(sz.height * fullScale));
+        UIGraphicsBeginImageContextWithOptions(fullSz, NO, 1.0);
+        [orig drawInRect:CGRectMake(0, 0, fullSz.width, fullSz.height)];
+        UIImage *fullImg = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        NSData *jpegData = UIImageJPEGRepresentation(fullImg, 0.8);
+
+        // Thumbnail for chat bubble display (capped at 160x160)
+        CGFloat maxD = 160.0;
         CGFloat scale = (sz.width > maxD || sz.height > maxD) ? MIN(maxD / sz.width, maxD / sz.height) : 1.0;
         CGSize newSz = CGSizeMake(floorf(sz.width * scale), floorf(sz.height * scale));
         UIGraphicsBeginImageContextWithOptions(newSz, NO, 1.0);
@@ -301,7 +324,8 @@ static NSString *durationStr(unsigned int secs)
         NSData *thumbData = UIImageJPEGRepresentation(thumbImg, 0.7);
 
         NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
-        [[WAChatStore shared] recordOutgoingMedia:thumbData caption:nil toJID:self.jid msgId:mid status:WAMessageStatusSent];
+        [[WAChatStore shared] recordOutgoingMedia:thumbData caption:nil toJID:self.jid msgId:mid status:WAMessageStatusPending];
+        [[WASession shared] sendImage:jpegData thumb:thumbData caption:nil toJID:self.jid msgId:mid];
     }
     if (self.popover) {
         [self.popover dismissPopoverAnimated:YES];

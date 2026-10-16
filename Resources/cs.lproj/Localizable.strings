@@ -24,6 +24,7 @@
 "call_connecting" = "P\U0159ipojov\U00e1n\U00ed\U2026";
 "call_connected" = "P\U0159ipojeno";
 "call_ended" = "Hovor ukon\U010den";
+"call_declined" = "Hovor odm\U00edtnut";
 "call_accept" = "P\U0159ijmout";
 "call_decline" = "Odm\U00edtnout";
 "call_end" = "Zav\U011bsit";

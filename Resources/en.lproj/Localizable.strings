@@ -24,6 +24,7 @@
 "call_connecting" = "Connecting\U2026";
 "call_connected" = "Connected";
 "call_ended" = "Call ended";
+"call_declined" = "Call declined";
 "call_accept" = "Accept";
 "call_decline" = "Decline";
 "call_end" = "End";

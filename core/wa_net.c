@@ -623,3 +623,96 @@ uint8_t *wa_https_get_bin(const char *host, const char *path, const char *ca_fil
     if (outlen) *outlen = n;
     return body;
 }
+
+static int https_post_internal(const char *host, const char *path, const char *ca_file,
+                               const uint8_t *body, size_t body_len, const char *content_type,
+                               int timeout_ms, wa_buf *out)
+{
+    char err[160];
+    wa_ws *c = connect_tls(host, 443, ca_file, timeout_ms, err, sizeof err);
+    if (!c) { wa_log("https post %s: %s", host, err); return -1; }
+    char req[2048];
+    snprintf(req, sizeof req,
+             "POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+             "Accept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+             path, host, content_type ? content_type : "application/octet-stream", body_len);
+    char head[4096];
+    int st = -1;
+    if (tls_write_all(c, (const uint8_t *)req, strlen(req)) == 0 &&
+        (body_len == 0 || tls_write_all(c, body, body_len) == 0)) {
+        st = read_http_head(c, timeout_ms, head, sizeof head);
+    }
+    if (st > 0) {
+        long clen = -1;
+        int chunked = 0;
+        for (char *line = head; line && *line; ) {
+            char *nl = strstr(line, "\r\n");
+            if (nl) *nl = 0;
+#ifdef _WIN32
+            if (_strnicmp(line, "content-length:", 15) == 0) clen = atol(line + 15);
+            if (_strnicmp(line, "transfer-encoding:", 18) == 0 && strstr(line, "chunked")) chunked = 1;
+#else
+            if (strncasecmp(line, "content-length:", 15) == 0) clen = atol(line + 15);
+            if (strncasecmp(line, "transfer-encoding:", 18) == 0 && strstr(line, "chunked")) chunked = 1;
+#endif
+            line = nl ? nl + 2 : NULL;
+        }
+        uint64_t deadline = wa_now_us() + (uint64_t)timeout_ms * 1000;
+        while ((clen < 0 || (long)c->raw.len < clen) && wa_now_us() < deadline) {
+            int r = tls_read_some(c, 1000);
+            if (r < 0) break;
+            if (chunked && c->raw.len >= 5 && memcmp(c->raw.data + c->raw.len - 5, "0\r\n\r\n", 5) == 0) break;
+        }
+        wa_buf_append_byte(&c->raw, 0);
+        c->raw.len--;
+        if (chunked) {
+            size_t pos = 0;
+            while (pos < c->raw.len) {
+                long n = strtol((const char *)c->raw.data + pos, NULL, 16);
+                const uint8_t *crlf = (const uint8_t *)strstr((const char *)c->raw.data + pos, "\r\n");
+                if (n <= 0 || !crlf) break;
+                pos = (size_t)(crlf - c->raw.data) + 2;
+                if (pos + (size_t)n > c->raw.len) n = (long)(c->raw.len - pos);
+                wa_buf_append(out, c->raw.data + pos, (size_t)n);
+                pos += (size_t)n + 2;
+            }
+        } else {
+            wa_buf_append(out, c->raw.data, c->raw.len);
+        }
+    }
+    c->closed = 1;
+    wa_ws_close(c);
+    return st;
+}
+
+char *wa_https_post(const char *host, const char *path, const char *ca_file,
+                    const uint8_t *body, size_t body_len, const char *content_type,
+                    int timeout_ms, int *status)
+{
+    if (status) *status = 0;
+    wa_buf out;
+    wa_buf_init(&out);
+    int st = https_post_internal(host, path, ca_file, body, body_len, content_type, timeout_ms, &out);
+    if (status) *status = st;
+    if (st <= 0) { wa_buf_free(&out); return NULL; }
+    wa_buf_append_byte(&out, 0);
+    return (char *)wa_buf_detach(&out, NULL);
+}
+
+uint8_t *wa_https_post_bin(const char *host, const char *path, const char *ca_file,
+                           const uint8_t *body, size_t body_len, const char *content_type,
+                           int timeout_ms, int *status, size_t *outlen)
+{
+    if (status) *status = 0;
+    if (outlen) *outlen = 0;
+    wa_buf out;
+    wa_buf_init(&out);
+    int st = https_post_internal(host, path, ca_file, body, body_len, content_type, timeout_ms, &out);
+    if (status) *status = st;
+    if (st <= 0 || out.len == 0) { wa_buf_free(&out); return NULL; }
+    size_t n = 0;
+    uint8_t *b = wa_buf_detach(&out, &n);
+    if (outlen) *outlen = n;
+    return b;
+}

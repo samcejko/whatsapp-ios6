@@ -175,9 +175,35 @@ static NSString *msgSig(NSDictionary *m)
 - (void)onMessage:(NSNotification *)n
 {
     NSString *from = n.userInfo[@"from"];
-    NSString *text = n.userInfo[@"text"];
     if (![from isKindOfClass:[NSString class]] || !from.length) return;
-    [self appendText:(text ?: @"") toJID:from outgoing:NO ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:nil status:WAMessageStatusDelivered];
+    [self appendLiveMessage:n.userInfo toJID:from];
+}
+
+- (void)appendLiveMessage:(NSDictionary *)msg toJID:(NSString *)jid
+{
+    if (!jid.length || ![msg isKindOfClass:[NSDictionary class]]) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    if (WAIsRawNumberOrEmpty(e[@"name"])) e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
+    NSMutableDictionary *m = [msg mutableCopy];
+    [m removeObjectForKey:@"from"];
+    [self mergeMessages:@[ m ] into:e];
+    unsigned long long ts = [m[@"ts"] unsignedLongLongValue];
+    if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
+    NSUInteger unread = [e[@"unread"] unsignedIntegerValue];
+    e[@"unread"] = @(unread + 1);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+}
+
+- (void)markRead:(NSString *)jid
+{
+    if (!jid.length) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:NO];
+    if (e && [e[@"unread"] unsignedIntegerValue] > 0) {
+        e[@"unread"] = @(0);
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+    }
 }
 
 - (void)onMessageStatus:(NSNotification *)n

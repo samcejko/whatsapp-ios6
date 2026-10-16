@@ -11,6 +11,8 @@ extern NSString *const WASessionMessageStatus;   // userInfo: @"id" (NSString), 
 extern NSString *const WASessionConversations;   // userInfo: @"conversations" (NSArray of @{jid,name,last,ts,unread}) from a history-sync chunk
 extern NSString *const WASessionPresenceChanged; // userInfo: @"jid" (NSString), @"state" (NSString: available/unavailable/composing/paused), @"last" (NSString, optional)
 extern NSString *const WASessionIncomingCall;    // userInfo: @"jid" (NSString), @"video" (NSNumber BOOL), @"callId" (NSString)
+extern NSString *const WASessionCallAccepted;    // userInfo: @"callId" (NSString)
+extern NSString *const WASessionCallEnded;       // userInfo: @"callId" (NSString), @"reason" (NSString, optional)
 
 typedef NS_ENUM(NSInteger, WASessionState) {
     WASessionStateDisconnected = 0,
@@ -36,6 +38,8 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 // Send a 1:1 text to a bare user JID ("<num>@s.whatsapp.net"). Runs on the client thread.
 - (void)sendText:(NSString *)text toJID:(NSString *)jid;
 - (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid;
+- (void)sendImage:(NSData *)jpegData thumb:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid;
+- (void)sendReadReceiptForMessage:(NSString *)mid toJID:(NSString *)jid participant:(NSString *)part;
 // Place a 1:1 call to a bare user JID. Sends the encrypted <offer>; the media comes up on the client thread.
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video;
 - (void)acceptCall;

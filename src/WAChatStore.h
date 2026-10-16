@@ -35,6 +35,12 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Update status of a message by id (e.g. pending -> sent -> delivered -> read)
 - (void)updateMessageStatus:(WAMessageStatus)status msgId:(NSString *)mid;
 
+// Ingest a live incoming message with full metadata
+- (void)appendLiveMessage:(NSDictionary *)msg toJID:(NSString *)jid;
+
+// Mark all messages in a conversation as read (unread count = 0)
+- (void)markRead:(NSString *)jid;
+
 // Delete a conversation and its messages (persist + notify).
 - (void)deleteChat:(NSString *)jid;
 

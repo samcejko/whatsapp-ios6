@@ -80,10 +80,8 @@
         [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:(self.video ? @selector(noop) : @selector(toggleSpeaker))];
     }
 
-    // Outgoing calls "ring" then "connect" (the real transitions come from the call engine's signaling events).
-    if (!self.incoming) {
-        [self performSelector:@selector(setRinging) withObject:nil afterDelay:0.8];
-    }
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallAccepted:) name:WASessionCallAccepted object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallEnded:) name:WASessionCallEnded object:nil];
 }
 
 - (void)drawBackground
@@ -132,16 +130,38 @@
     }
 }
 
-- (void)setRinging { if (!self.connected) self.statusLabel.text = WALoc(@"call_ringing"); [self performSelector:@selector(connect) withObject:nil afterDelay:1.2]; }
+- (void)onCallAccepted:(NSNotification *)n
+{
+    if (self.connected) return;
+    WALog(@"call accepted by remote peer!");
+    [self connect];
+}
+
+- (void)onCallEnded:(NSNotification *)n
+{
+    WALog(@"call ended by remote peer");
+    [self.timer invalidate];
+    self.timer = nil;
+    [self.audio stop];
+    self.audio = nil;
+    NSString *reason = n.userInfo[@"reason"];
+    if ([reason isEqualToString:@"rejected"] || [reason isEqualToString:@"busy"]) {
+        self.statusLabel.text = WALoc(@"call_declined");
+    } else {
+        self.statusLabel.text = WALoc(@"call_ended");
+    }
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    [self performSelector:@selector(dismiss) withObject:nil afterDelay:1.0];
+}
 
 - (void)connect
 {
     self.connected = YES;
+    self.statusLabel.text = WALoc(@"call_connected");
     self.startTime = [NSDate timeIntervalSinceReferenceDate];
     self.timer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self tick];
-    // Open the mic/speaker (echo-cancelled, 16 kHz Opus). The encoded frames are SRTP-wrapped and sent to the
-    // relay by the call engine once the media transport is up (live path, tested on device).
+    // Open the mic/speaker (echo-cancelled, 16 kHz Opus)
     self.audio = [[WAAudioEngine alloc] init];
     self.audio.onFrame = ^(NSData *frame) { /* call engine: SRTP-protect + wa_rtc_send */ (void)frame; };
     [self.audio start];
@@ -187,6 +207,11 @@
 
 - (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
 
-- (void)dealloc { [self.timer invalidate]; [self.audio stop]; }
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self.timer invalidate];
+    [self.audio stop];
+}
 
 @end

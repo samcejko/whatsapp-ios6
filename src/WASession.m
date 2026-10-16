@@ -18,6 +18,8 @@ NSString *const WASessionMessageStatus = @"WASessionMessageStatus";
 NSString *const WASessionConversations = @"WASessionConversations";
 NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
 NSString *const WASessionIncomingCall = @"WASessionIncomingCall";
+NSString *const WASessionCallAccepted = @"WASessionCallAccepted";
+NSString *const WASessionCallEnded = @"WASessionCallEnded";
 
 @interface WASession () {
 @public
@@ -114,7 +116,9 @@ static void cb_node(void *ctx, const wa_node *node)
         char from[80] = { 0 };
         wa_history_result hist;
         int is_history = 0;
-        char *text = wa_chat_handle_message(self->_client, self->_sessions, node, from, sizeof from, &hist, &is_history);
+        wa_history_msg live_msg;
+        memset(&live_msg, 0, sizeof live_msg);
+        int ok = wa_chat_handle_message_full(self->_client, self->_sessions, node, from, sizeof from, &live_msg, &hist, &is_history);
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
         send_ack(self, node, "message");
         if (is_history && hist.nconvs > 0) {
@@ -160,13 +164,29 @@ static void cb_node(void *ctx, const wa_node *node)
             });
         }
         wa_history_result_free(&hist);
-        if (text) {
+        if (ok) {
             NSString *f = [NSString stringWithUTF8String:from];
-            NSString *t = [NSString stringWithUTF8String:text];
-            free(text);
+            NSString *t = live_msg.text ? [NSString stringWithUTF8String:live_msg.text] : @"";
+            NSMutableDictionary *md = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                                       (f ?: @""), @"from",
+                                       (t ?: @""), @"text",
+                                       @NO, @"out",
+                                       @(live_msg.timestamp ?: (unsigned long long)[[NSDate date] timeIntervalSince1970]), @"ts",
+                                       @(live_msg.kind), @"kind",
+                                       @(WA_STATUS_DELIVERY_ACK), @"status", nil];
+            if (live_msg.id) { NSString *mid = [NSString stringWithUTF8String:live_msg.id]; if (mid) md[@"id"] = mid; }
+            if (live_msg.duration) md[@"dur"] = @(live_msg.duration);
+            if (live_msg.filename) { NSString *fn = [NSString stringWithUTF8String:live_msg.filename]; if (fn) md[@"file"] = fn; }
+            if (live_msg.thumb && live_msg.thumb_len) md[@"thumb"] = [NSData dataWithBytes:live_msg.thumb length:live_msg.thumb_len];
+            if (live_msg.sender) { NSString *sn = [NSString stringWithUTF8String:live_msg.sender]; if (sn.length) md[@"sender"] = sn; }
+            if (live_msg.direct_path) { NSString *dp = [NSString stringWithUTF8String:live_msg.direct_path]; if (dp.length) md[@"dpath"] = dp; }
+            if (live_msg.media_key && live_msg.media_key_len) md[@"mkey"] = [NSData dataWithBytes:live_msg.media_key length:live_msg.media_key_len];
+            if (live_msg.enc_sha && live_msg.enc_sha_len) md[@"esha"] = [NSData dataWithBytes:live_msg.enc_sha length:live_msg.enc_sha_len];
+
             dispatch_async(dispatch_get_main_queue(), ^{
-                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessage object:self userInfo:@{ @"from": f ?: @"", @"text": t ?: @"" }];
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessage object:self userInfo:md];
             });
+            wa_history_msg_free(&live_msg);
         }
         return;
     }
@@ -188,9 +208,37 @@ static void cb_node(void *ctx, const wa_node *node)
                                                                               @"callId": (callId ?: @""),
                                                                               @"video": @(video) }];
             });
+            return;
+        }
+        for (int i = 0; i < node->nchildren; i++) {
+            const wa_node *child = node->children[i];
+            if (wa_node_tag_is(child, "accept")) {
+                const char *cid = wa_node_get(child, "call-id");
+                NSString *callId = cid ? [NSString stringWithUTF8String:cid] : @"";
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[NSNotificationCenter defaultCenter] postNotificationName:WASessionCallAccepted
+                                                                        object:self
+                                                                      userInfo:@{ @"callId": (callId ?: @"") }];
+                });
+                return;
+            }
+            if (wa_node_tag_is(child, "terminate") || wa_node_tag_is(child, "reject")) {
+                self->_hasCurrentCall = 0;
+                const char *cid = wa_node_get(child, "call-id");
+                const char *rsn = wa_node_get(child, "reason");
+                NSString *callId = cid ? [NSString stringWithUTF8String:cid] : @"";
+                NSString *reason = rsn ? [NSString stringWithUTF8String:rsn] : @"ended";
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[NSNotificationCenter defaultCenter] postNotificationName:WASessionCallEnded
+                                                                        object:self
+                                                                      userInfo:@{ @"callId": (callId ?: @""), @"reason": (reason ?: @"") }];
+                });
+                return;
+            }
         }
         return;
     }
+
     if (wa_node_tag_is(node, "ack")) {
         const char *cls = wa_node_get(node, "class");
         if (cls && strcmp(cls, "message") == 0) {
@@ -493,6 +541,66 @@ static void action_terminate_call(wa_client *c, void *ctx)
     }
 }
 
+typedef struct {
+    void *session;
+    char jid[80];
+    char mid[40];
+    char *caption;
+    uint8_t *jpeg;
+    size_t jpeg_len;
+    uint8_t *thumb;
+    size_t thumb_len;
+} wa_image_action_ctx;
+
+static void action_send_image(wa_client *c, void *ctx)
+{
+    wa_image_action_ctx *a = (wa_image_action_ctx *)ctx;
+    WASession *self = (__bridge WASession *)a->session;
+    char used_id[40] = { 0 };
+    int rc = wa_chat_send_image(c, self->_sessions, a->jid,
+                                a->jpeg, a->jpeg_len,
+                                a->thumb, a->thumb_len,
+                                a->caption,
+                                a->mid[0] ? a->mid : NULL,
+                                used_id, sizeof used_id);
+    if (rc == 0) {
+        wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+    } else {
+        const char *fid = a->mid[0] ? a->mid : used_id;
+        if (fid[0]) {
+            NSString *mid = [NSString stringWithUTF8String:fid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_ERROR), @"error": @"send_image_failed" }];
+            });
+        }
+    }
+    free(a->caption);
+    free(a->jpeg);
+    free(a->thumb);
+    free(a);
+}
+
+typedef struct {
+    char jid[80];
+    char mid[40];
+    char part[80];
+} wa_receipt_ctx;
+
+static void action_send_read_receipt(wa_client *c, void *ctx)
+{
+    wa_receipt_ctx *r = (wa_receipt_ctx *)ctx;
+    wa_node *node = wa_node_new("receipt");
+    wa_node_attr(node, "to", r->jid);
+    wa_node_attr(node, "id", r->mid);
+    wa_node_attr(node, "type", "read");
+    if (r->part[0]) wa_node_attr(node, "participant", r->part);
+    wa_client_send(c, node);
+    wa_node_free(node);
+    free(r);
+}
+
 - (void)sendText:(NSString *)text toJID:(NSString *)jid
 {
     [self sendText:text toJID:jid msgId:nil];
@@ -516,6 +624,51 @@ static void action_terminate_call(wa_client *c, void *ctx)
         }
         free(a);
     }
+}
+
+- (void)sendImage:(NSData *)jpegData thumb:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid
+{
+    if (!_client || !jid.length || !jpegData.length) return;
+    wa_image_action_ctx *a = (wa_image_action_ctx *)calloc(1, sizeof *a);
+    a->session = (__bridge void *)self;
+    snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
+    if (mid.length) snprintf(a->mid, sizeof a->mid, "%s", mid.UTF8String);
+    if (caption.length) a->caption = strdup(caption.UTF8String);
+    a->jpeg = (uint8_t *)malloc(jpegData.length);
+    if (a->jpeg) {
+        memcpy(a->jpeg, jpegData.bytes, jpegData.length);
+        a->jpeg_len = jpegData.length;
+    }
+    if (thumbData.length) {
+        a->thumb = (uint8_t *)malloc(thumbData.length);
+        if (a->thumb) {
+            memcpy(a->thumb, thumbData.bytes, thumbData.length);
+            a->thumb_len = thumbData.length;
+        }
+    }
+    if (wa_client_post(_client, action_send_image, a) != 0) {
+        if (mid.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_ERROR), @"error": @"post_failed" }];
+            });
+        }
+        free(a->caption);
+        free(a->jpeg);
+        free(a->thumb);
+        free(a);
+    }
+}
+
+- (void)sendReadReceiptForMessage:(NSString *)mid toJID:(NSString *)jid participant:(NSString *)part
+{
+    if (!_client || !mid.length || !jid.length) return;
+    wa_receipt_ctx *r = (wa_receipt_ctx *)calloc(1, sizeof *r);
+    snprintf(r->jid, sizeof r->jid, "%s", jid.UTF8String);
+    snprintf(r->mid, sizeof r->mid, "%s", mid.UTF8String);
+    if (part.length) snprintf(r->part, sizeof r->part, "%s", part.UTF8String);
+    if (wa_client_post(_client, action_send_read_receipt, r) != 0) free(r);
 }
 
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video

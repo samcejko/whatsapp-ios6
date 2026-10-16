@@ -65,6 +65,12 @@ const char *wa_media_app_info(int kind);
 int wa_media_download(const char *direct_path, const uint8_t *media_key, const uint8_t *enc_sha, size_t enc_sha_len,
                       int kind, const char *ca_file, wa_buf *out);
 
+// Parse any Message protobuf payload (text, image, video, audio, document, etc.) into a wa_history_msg.
+// Returns 1 if a displayable message was parsed, 0 to skip.
+int wa_history_msg_parse(const uint8_t *inner, size_t innerl, wa_history_msg *m);
+// Free malloc'd fields inside a wa_history_msg
+void wa_history_msg_free(wa_history_msg *m);
+
 // One conversation surfaced from a HistorySync chunk. The strings/arrays are malloc'd (name/last/msgs may be NULL)
 // and owned by the wa_history_result; free the whole result with wa_history_result_free.
 typedef struct {

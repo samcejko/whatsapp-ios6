@@ -177,6 +177,25 @@ static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_m
     return 0;
 }
 
+int wa_history_msg_parse(const uint8_t *inner, size_t innerl, wa_history_msg *m)
+{
+    return extract_msg_content(inner, innerl, m);
+}
+
+void wa_history_msg_free(wa_history_msg *m)
+{
+    if (!m) return;
+    free(m->text);
+    free(m->id);
+    free(m->thumb);
+    free(m->filename);
+    free(m->sender);
+    free(m->direct_path);
+    free(m->media_key);
+    free(m->enc_sha);
+    memset(m, 0, sizeof *m);
+}
+
 static int msg_cmp_ts(const void *a, const void *b)
 {
     const wa_history_msg *x = (const wa_history_msg *)a, *y = (const wa_history_msg *)b;
