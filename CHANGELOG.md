@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fix: no messages after linking (one-time prekey upload)
+After pairing, the linked device never uploaded one-time prekeys, so the server held 0 keys
+(`<notification type="encrypt"><count value="0"/>`) and no peer — not even our own phone — could open a Signal
+session to us. The server therefore queued nothing (`<offline count="0"/>`) and no `<message>` ever arrived.
+- `wa_store` — the device now carries a one-time prekey pool (`wa_device_gen_prekeys` / `wa_device_find_prekey`),
+  persisted (store v2, still loads v1 so an already-linked device is not dropped).
+- `wa_user` — `wa_user_build_upload_prekeys_iq` builds the `<iq xmlns="encrypt" type="set">` upload
+  (registration / type / identity / `<list>` of `<key>` / `<skey>`), verified against whatsapp-rust.
+- `wa_client` — uploads a batch on first `<success>` and tops up on `<notification type="encrypt">` when the
+  server count is low; also acks received `<notification>`s.
+- `wa_chat` — inbound `pkmsg` now looks up our one-time prekey by the id in the PreKeySignalMessage header and
+  feeds it to the X3DH decrypt (previously passed NULL, so a delivered prekey message could not decrypt).
+- Self-tests: upload-IQ shape, and a full gen → header-id → find → decrypt → persist flow.
+
+Known follow-up: existing chat **history** (the backlog from before linking) still won't appear — that arrives as
+an encrypted history-sync blob that needs downloading + protobuf parsing. New incoming/outgoing messages work.
+
 ## 0.1.0 — the app
 
 Wazzup builds as an installable iOS app (armv7 for iOS 6, arm64 for iOS 14+) with the whole protocol stack and

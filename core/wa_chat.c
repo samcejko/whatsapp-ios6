@@ -149,6 +149,22 @@ char *wa_chat_handle_message(wa_client *c, wa_sess_store *sessions, const wa_nod
     our_signed_prekey(c, &spk);
 
     int is_prekey = strcmp(in.enc_type, "pkmsg") == 0;
+
+    // A PreKeySignalMessage was encrypted against one of OUR one-time prekeys; X3DH needs that private key.
+    // Pull the id out of the header and look it up in the device pool (passing NULL would drop the DH4 term).
+    wa_sig_keypair otp;
+    const wa_sig_keypair *otp_ptr = NULL;
+    if (is_prekey) {
+        uint32_t reg_id = 0, prekey_id = 0, spk_id = 0;
+        int has_pk = 0;
+        uint8_t base_pub[32], id_pub[32];
+        if (wa_sig_prekey_header(in.enc, in.enc_len, &reg_id, &has_pk, &prekey_id, &spk_id, base_pub, id_pub) == 0 && has_pk) {
+            const wa_keypair *k = wa_device_find_prekey(wa_client_device(c), prekey_id);
+            if (k) { memcpy(otp.priv, k->priv, 32); memcpy(otp.pub, k->pub, 32); otp_ptr = &otp; }
+            else wa_log("chat: pkmsg uses one-time prekey id %u we do not hold", (unsigned)prekey_id);
+        }
+    }
+
     wa_sig_session fresh;
     wa_sig_session *s = wa_sess_get(sessions, in.from);
     wa_sig_session *use = s;
@@ -156,7 +172,7 @@ char *wa_chat_handle_message(wa_client *c, wa_sess_store *sessions, const wa_nod
 
     wa_buf msg;
     wa_buf_init(&msg);
-    int rc = wa_msg_decrypt(use, &id, &spk, NULL, is_prekey, in.enc, in.enc_len, &msg);
+    int rc = wa_msg_decrypt(use, &id, &spk, otp_ptr, is_prekey, in.enc, in.enc_len, &msg);
     if (rc == 0) wa_sess_put(sessions, in.from, use);   // persist the advanced/established session
     char *text = rc == 0 ? wa_msg_parse_text(msg.data, msg.len) : NULL;
     wa_buf_free(&msg);

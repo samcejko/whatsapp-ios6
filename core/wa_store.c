@@ -36,13 +36,49 @@ int wa_device_new(wa_device *d)
     if (wa_curve_sign(d->signed_pre_key_sig, d->identity_key.priv, serialized, sizeof serialized) != 0) return -1;
 
     if (wa_random(d->adv_secret_key, 32) != 0) return -1;
+    d->next_pre_key_id = 1;   // one-time prekeys are minted lazily, uploaded after the first login
     return 0;
+}
+
+// -------------------------------------------------------------------------------------------------- one-time prekeys
+
+int wa_device_gen_prekeys(wa_device *d, int count, uint32_t *out_ids, uint8_t (*out_pubs)[32], int out_cap)
+{
+    if (!d || count <= 0 || !out_ids || !out_pubs) return -1;
+    if (count > out_cap) count = out_cap;
+    int made = 0;
+    for (int i = 0; i < count; i++) {
+        wa_otpk pk;
+        memset(&pk, 0, sizeof pk);
+        pk.id = d->next_pre_key_id ? d->next_pre_key_id : 1;
+        if (pk.id > 0x00FFFFFFu) pk.id = 1;          // ids are 3 bytes on the wire; wrap (never hit in practice)
+        gen_keypair(&pk.key);
+        d->next_pre_key_id = pk.id + 1;
+        if (d->one_time_count < WA_OTPK_MAX) {
+            d->one_time[d->one_time_count++] = pk;
+        } else {                                      // pool full: drop the oldest, keep the newest WA_OTPK_MAX
+            memmove(&d->one_time[0], &d->one_time[1], sizeof(wa_otpk) * (WA_OTPK_MAX - 1));
+            d->one_time[WA_OTPK_MAX - 1] = pk;
+        }
+        out_ids[made] = pk.id;
+        memcpy(out_pubs[made], pk.key.pub, 32);
+        made++;
+    }
+    return made;
+}
+
+const wa_keypair *wa_device_find_prekey(const wa_device *d, uint32_t id)
+{
+    if (!d) return NULL;
+    for (int i = 0; i < d->one_time_count; i++)
+        if (d->one_time[i].id == id) return &d->one_time[i].key;
+    return NULL;
 }
 
 // -------------------------------------------------------------------------------------------------- persistence
 
 #define STORE_MAGIC 0x57413644u   // "WA6D"
-#define STORE_VER 1
+#define STORE_VER 2               // v2 appends the one-time prekey pool; v1 files still load (pool empty)
 
 int wa_device_save(const wa_device *d, const char *path)
 {
@@ -83,6 +119,23 @@ int wa_device_save(const wa_device *d, const char *path)
     wa_buf_append_byte(&b, (uint8_t)d->have_server_static);
     wa_buf_append(&b, d->server_static, 32);
 
+    // v2: one-time prekey pool
+    uint8_t npk[4];
+    wa_put_u32(npk, d->next_pre_key_id);
+    wa_buf_append(&b, npk, 4);
+    wa_buf_append_byte(&b, (uint8_t)d->server_has_prekeys);
+    uint8_t cnt[2];
+    int n = d->one_time_count < 0 ? 0 : (d->one_time_count > WA_OTPK_MAX ? WA_OTPK_MAX : d->one_time_count);
+    wa_put_u16(cnt, (uint16_t)n);
+    wa_buf_append(&b, cnt, 2);
+    for (int i = 0; i < n; i++) {
+        uint8_t kid[4];
+        wa_put_u32(kid, d->one_time[i].id);
+        wa_buf_append(&b, kid, 4);
+        wa_buf_append(&b, d->one_time[i].key.priv, 32);
+        wa_buf_append(&b, d->one_time[i].key.pub, 32);
+    }
+
     FILE *f = fopen(path, "wb");
     int ok = f && fwrite(b.data, 1, b.len, f) == b.len;
     if (f) fclose(f);
@@ -111,7 +164,9 @@ int wa_device_load(wa_device *d, const char *path)
 
     memset(d, 0, sizeof *d);
     rd r = { buf, buf + sz, 0 };
-    if (rdu32(&r) != STORE_MAGIC || rdu32(&r) != STORE_VER) { free(buf); return -1; }
+    if (rdu32(&r) != STORE_MAGIC) { free(buf); return -1; }
+    uint32_t ver = rdu32(&r);
+    if (ver != 1 && ver != 2) { free(buf); return -1; }
     d->registration_id = rdu32(&r);
     rdcopy(&r, d->noise_key.priv, 32);
     rdcopy(&r, d->noise_key.pub, 32);
@@ -134,6 +189,22 @@ int wa_device_load(wa_device *d, const char *path)
     rdcopy(&r, &hs, 1);
     d->have_server_static = hs;
     rdcopy(&r, d->server_static, 32);
+
+    if (ver >= 2 && !r.err) {
+        d->next_pre_key_id = rdu32(&r);
+        uint8_t shp = 0;
+        rdcopy(&r, &shp, 1);
+        d->server_has_prekeys = shp;
+        uint16_t n = rdu16(&r);
+        if (n > WA_OTPK_MAX) { r.err = 1; }
+        for (int i = 0; i < n && !r.err; i++) {
+            d->one_time[i].id = rdu32(&r);
+            rdcopy(&r, d->one_time[i].key.priv, 32);
+            rdcopy(&r, d->one_time[i].key.pub, 32);
+        }
+        if (!r.err) d->one_time_count = n;
+    }
+    if (d->next_pre_key_id == 0) d->next_pre_key_id = 1;   // v1 upgrade / fresh
     free(buf);
     return r.err ? -1 : 0;
 }

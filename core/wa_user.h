@@ -27,6 +27,13 @@ int wa_user_parse_devices(const wa_node *iq_result, wa_device_list *out);
 
 // Build the prekey-fetch IQ for device JIDs ("<num>:<dev>@s.whatsapp.net"). Returns a new <iq> node.
 wa_node *wa_user_build_prekey_iq(const char *const *device_jids, int n);
+
+// Build the one-time-prekey UPLOAD IQ (<iq xmlns="encrypt" type="set">): our registration id, identity, a batch
+// of one-time prekeys (ids[]/pubs[]), and the signed prekey. This is what tells the server peers can open a session
+// to us; without it the server has 0 keys and nothing is ever delivered. Returns a new <iq> node (no id attr).
+wa_node *wa_user_build_upload_prekeys_iq(uint32_t reg_id, const uint8_t identity_pub[32],
+                                         uint32_t skey_id, const uint8_t skey_pub[32], const uint8_t skey_sig[64],
+                                         const uint32_t *ids, const uint8_t (*pubs)[32], int nkeys);
 // Parse one <user> node from a prekey-fetch response into a bundle. Returns 1 on success.
 int wa_user_parse_bundle(const wa_node *user_node, wa_sig_bundle *out);
 

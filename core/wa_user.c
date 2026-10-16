@@ -71,6 +71,45 @@ wa_node *wa_user_build_prekey_iq(const char *const *device_jids, int n)
     return iq;
 }
 
+// prekey ids go on the wire as 3-byte big-endian.
+static void set_id3(wa_node *parent, const char *tag, uint32_t id)
+{
+    uint8_t b[3] = { (uint8_t)(id >> 16), (uint8_t)(id >> 8), (uint8_t)id };
+    wa_node_set_bytes(wa_node_add_new(parent, tag), b, 3);
+}
+
+wa_node *wa_user_build_upload_prekeys_iq(uint32_t reg_id, const uint8_t identity_pub[32],
+                                         uint32_t skey_id, const uint8_t skey_pub[32], const uint8_t skey_sig[64],
+                                         const uint32_t *ids, const uint8_t (*pubs)[32], int nkeys)
+{
+    wa_node *iq = wa_node_new("iq");
+    wa_node_attr(iq, "xmlns", "encrypt");
+    wa_node_attr(iq, "type", "set");
+    wa_node_attr(iq, "to", SERVER_JID);
+
+    uint8_t reg[4];
+    wa_put_u32(reg, reg_id);
+    wa_node_set_bytes(wa_node_add_new(iq, "registration"), reg, 4);
+
+    uint8_t type = 5;   // Curve25519 (DJB)
+    wa_node_set_bytes(wa_node_add_new(iq, "type"), &type, 1);
+
+    wa_node_set_bytes(wa_node_add_new(iq, "identity"), identity_pub, 32);
+
+    wa_node *list = wa_node_add_new(iq, "list");
+    for (int i = 0; i < nkeys; i++) {
+        wa_node *key = wa_node_add_new(list, "key");
+        set_id3(key, "id", ids[i]);
+        wa_node_set_bytes(wa_node_add_new(key, "value"), pubs[i], 32);
+    }
+
+    wa_node *skey = wa_node_add_new(iq, "skey");
+    set_id3(skey, "id", skey_id);
+    wa_node_set_bytes(wa_node_add_new(skey, "value"), skey_pub, 32);
+    wa_node_set_bytes(wa_node_add_new(skey, "signature"), skey_sig, 64);
+    return iq;
+}
+
 // A <value>/<identity> may be 32 raw bytes or 33 with a leading 0x05 type byte; return the 32-byte key.
 static int key32(const wa_node *n, uint8_t out[32])
 {
@@ -161,5 +200,36 @@ int wa_user_selftest(void)
          memcmp(b.signed_prekey_sig, sig, 64) == 0;
     wa_node_free(u2);
     if (!ok) { wa_log("user selftest: bundle parse failed"); return -1; }
+
+    // Build the one-time-prekey upload IQ and check its wire shape (verified vs whatsapp-rust wacore/iq/prekeys.rs).
+    uint32_t up_ids[2] = { 0x010203, 7 };
+    uint8_t up_pubs[2][32];
+    for (int i = 0; i < 32; i++) { up_pubs[0][i] = (uint8_t)i; up_pubs[1][i] = (uint8_t)(i + 9); }
+    wa_node *up = wa_user_build_upload_prekeys_iq(0x1234, ident, 3, spk, sig, up_ids, (const uint8_t (*)[32])up_pubs, 2);
+    wa_node *reg = wa_node_child(up, "registration");
+    wa_node *ty = wa_node_child(up, "type");
+    wa_node *idn = wa_node_child(up, "identity");
+    wa_node *lst = wa_node_child(up, "list");
+    wa_node *sk = wa_node_child(up, "skey");
+    ok = up && reg && reg->content_len == 4 && ty && ty->content_len == 1 && ty->content[0] == 5 &&
+         idn && idn->content_len == 32 && memcmp(idn->content, ident, 32) == 0 &&
+         lst && lst->nchildren == 2 && sk;
+    if (ok) {
+        wa_node *k0 = lst->children[0];
+        wa_node *k0id = wa_node_child(k0, "id");
+        wa_node *k0val = wa_node_child(k0, "value");
+        ok = wa_node_tag_is(k0, "key") && k0id && k0id->content_len == 3 &&
+             k0id->content[0] == 1 && k0id->content[1] == 2 && k0id->content[2] == 3 &&
+             k0val && k0val->content_len == 32 && memcmp(k0val->content, up_pubs[0], 32) == 0;
+    }
+    if (ok) {
+        wa_node *skid = wa_node_child(sk, "id");
+        wa_node *skval = wa_node_child(sk, "value");
+        wa_node *sksig = wa_node_child(sk, "signature");
+        ok = skid && skid->content_len == 3 && skid->content[2] == 3 &&
+             skval && skval->content_len == 32 && sksig && sksig->content_len == 64;
+    }
+    wa_node_free(up);
+    if (!ok) { wa_log("user selftest: upload-prekeys IQ shape failed"); return -1; }
     return 0;
 }

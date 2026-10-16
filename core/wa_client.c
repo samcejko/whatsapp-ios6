@@ -3,6 +3,7 @@
 #include "wa_noise.h"
 #include "wa_pair.h"
 #include "wa_crypto.h"
+#include "wa_user.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,7 @@ struct wa_client {
     wa_client_state state;
     int stop;
     int reconnect_wanted;     // set after pair-success (expected 515)
+    int prekeys_sent;         // one-time prekeys uploaded on this connection (reset on connect)
 
     // pairing QR refs (WA refs can exceed 100 bytes; keep them whole)
     char refs[8][512];
@@ -366,6 +368,61 @@ static int take_pending_iq(wa_client *c, const wa_node *node)
     return taken;
 }
 
+// -------------------------------------------------------------------------------------------------- post-login
+
+#define WA_PREKEY_BATCH 30     // enough one-time prekeys for linking + the first wave of contacts
+#define WA_PREKEY_MIN   5      // top up when the server reports fewer than this
+
+// Generate and upload a batch of one-time prekeys. Without this the server holds 0 keys, so no peer (not even our
+// own phone) can open a Signal session to us, and nothing — history sync or live messages — is ever delivered.
+static void upload_prekeys(wa_client *c)
+{
+    uint32_t ids[WA_PREKEY_BATCH];
+    uint8_t pubs[WA_PREKEY_BATCH][32];
+    int n = wa_device_gen_prekeys(c->dev, WA_PREKEY_BATCH, ids, pubs, WA_PREKEY_BATCH);
+    if (n <= 0) { wa_log("prekeys: generation failed"); return; }
+    wa_node *iq = wa_user_build_upload_prekeys_iq(c->dev->registration_id, c->dev->identity_key.pub,
+                                                  c->dev->signed_pre_key_id, c->dev->signed_pre_key.pub,
+                                                  c->dev->signed_pre_key_sig, ids, (const uint8_t (*)[32])pubs, n);
+    char id[24];
+    int rc = wa_client_send_iq(c, iq, id, sizeof id);
+    wa_node_free(iq);
+    c->prekeys_sent = 1;
+    c->dev->server_has_prekeys = 1;
+    if (c->cb.on_device_changed) c->cb.on_device_changed(c->cb.ctx, c->dev);   // persist the pool + the flag
+    wa_log("prekeys: uploaded %d (id=%s rc=%d)", n, id, rc);
+}
+
+// Acknowledge a received <notification>/<receipt> so the server stops redelivering it.
+static void send_recv_ack(wa_client *c, const wa_node *node, const char *cls)
+{
+    const char *id = wa_node_get(node, "id");
+    const char *from = wa_node_get(node, "from");
+    if (!id) return;
+    wa_node *ack = wa_node_new("ack");
+    wa_node_attr(ack, "to", from ? from : "@s.whatsapp.net");
+    wa_node_attr(ack, "id", id);
+    wa_node_attr(ack, "class", cls);
+    const char *type = wa_node_get(node, "type");
+    if (type) wa_node_attr(ack, "type", type);
+    const char *participant = wa_node_get(node, "participant");
+    if (participant) wa_node_attr(ack, "participant", participant);
+    wa_client_send(c, ack);
+    wa_node_free(ack);
+}
+
+static void handle_notification(wa_client *c, const wa_node *node)
+{
+    send_recv_ack(c, node, "notification");
+    const char *type = wa_node_get(node, "type");
+    if (type && strcmp(type, "encrypt") == 0) {
+        // <count value="N"/>: N one-time prekeys left on the server. 0 right after linking -> upload now.
+        wa_node *cnt = wa_node_child(node, "count");
+        long n = cnt ? strtol(wa_node_get_or(cnt, "value", "0"), NULL, 10) : 0;
+        if (!c->prekeys_sent && n < WA_PREKEY_MIN) upload_prekeys(c);
+    }
+}
+
 static void dispatch(wa_client *c, const wa_node *node)
 {
     {
@@ -385,6 +442,9 @@ static void dispatch(wa_client *c, const wa_node *node)
         (void)pn;
         wa_log("<- success: logged in");
         if (c->cb.on_connected) c->cb.on_connected(c->cb.ctx);
+        // First login after linking: the server has none of our one-time prekeys, so upload a batch now.
+        // (A <notification type="encrypt"> usually follows and would also trigger this; prekeys_sent dedupes.)
+        if (!c->prekeys_sent && !c->dev->server_has_prekeys) upload_prekeys(c);
         return;
     } else if (wa_node_tag_is(node, "failure")) {
         const char *reason = wa_node_get_or(node, "reason", "login failure");
@@ -399,6 +459,7 @@ static void dispatch(wa_client *c, const wa_node *node)
         else set_err(c, "stream error %s", code);
         return;   // the read loop ends when the socket closes
     }
+    if (wa_node_tag_is(node, "notification")) handle_notification(c, node);
     if (c->cb.on_node) c->cb.on_node(c->cb.ctx, node);
 }
 
@@ -440,6 +501,7 @@ int wa_client_connect(wa_client *c)
 {
     c->state = WA_CONNECTING;
     c->reconnect_wanted = 0;
+    c->prekeys_sent = 0;
     char err[192];
     c->ws = wa_ws_open(c->cfg.host, 443, c->cfg.path, c->cfg.origin,
                        c->cfg.verify_tls ? c->cfg.ca_file : NULL, 15000, err, sizeof err);

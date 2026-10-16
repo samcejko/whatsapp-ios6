@@ -90,6 +90,82 @@ static int test_payload(void)
     return ok;
 }
 
+static int test_prekey_flow(void)
+{
+    // Bob (us) mints a one-time prekey pool; Alice fetches one and sends a pkmsg; we look the prekey back up by the
+    // id in the header and decrypt. This is exactly the inbound path wa_chat_handle_message runs on the device.
+    wa_device bob;
+    if (wa_device_new(&bob) != 0) return 0;
+    uint32_t ids[5];
+    uint8_t pubs[5][32];
+    if (wa_device_gen_prekeys(&bob, 5, ids, pubs, 5) != 5) return 0;
+
+    wa_sig_bundle b;
+    memset(&b, 0, sizeof b);
+    b.registration_id = bob.registration_id;
+    memcpy(b.identity_pub, bob.identity_key.pub, 32);
+    b.signed_prekey_id = bob.signed_pre_key_id;
+    memcpy(b.signed_prekey_pub, bob.signed_pre_key.pub, 32);
+    memcpy(b.signed_prekey_sig, bob.signed_pre_key_sig, 64);
+    b.has_one_time = 1;
+    b.prekey_id = ids[2];
+    memcpy(b.one_time_pub, pubs[2], 32);
+
+    wa_sig_keypair alice_id;
+    if (wa_curve_keypair(alice_id.priv, alice_id.pub) != 0) return 0;
+    wa_sig_session alice;
+    if (wa_sig_init_outgoing(&alice, &alice_id, 4242, &b) != 0) return 0;
+
+    wa_buf pt, enc;
+    wa_buf_init(&pt);
+    wa_buf_init(&enc);
+    int is_prekey = 0, ok = 0;
+    if (wa_msg_text_plaintext("ahoj z telefonu", &pt) == 0 &&
+        wa_msg_encrypt(&alice, &alice_id, pt.data, pt.len, &is_prekey, &enc) == 0 && is_prekey) {
+        uint32_t reg_id = 0, prekey_id = 0, spk_id = 0;
+        int has_pk = 0;
+        uint8_t base_pub[32], id_pub[32];
+        ok = wa_sig_prekey_header(enc.data, enc.len, &reg_id, &has_pk, &prekey_id, &spk_id, base_pub, id_pub) == 0 &&
+             has_pk && prekey_id == ids[2];
+        const wa_keypair *k = ok ? wa_device_find_prekey(&bob, prekey_id) : NULL;
+        ok = ok && k && memcmp(k->pub, pubs[2], 32) == 0;
+        if (ok) {
+            wa_sig_keypair bob_id, bob_spk, otp;
+            memcpy(bob_id.priv, bob.identity_key.priv, 32);
+            memcpy(bob_id.pub, bob.identity_key.pub, 32);
+            memcpy(bob_spk.priv, bob.signed_pre_key.priv, 32);
+            memcpy(bob_spk.pub, bob.signed_pre_key.pub, 32);
+            memcpy(otp.priv, k->priv, 32);
+            memcpy(otp.pub, k->pub, 32);
+            wa_sig_session bob_sess;
+            memset(&bob_sess, 0, sizeof bob_sess);
+            wa_buf got;
+            wa_buf_init(&got);
+            ok = wa_msg_decrypt(&bob_sess, &bob_id, &bob_spk, &otp, 1, enc.data, enc.len, &got) == 0;
+            char *text = ok ? wa_msg_parse_text(got.data, got.len) : NULL;
+            ok = text && strcmp(text, "ahoj z telefonu") == 0;
+            free(text);
+            wa_buf_free(&got);
+        }
+    }
+    wa_buf_free(&pt);
+    wa_buf_free(&enc);
+
+    // save/load preserves the pool so the key is still found after a restart
+    if (ok) {
+        char tmp[L_tmpnam + 8];
+        if (tmpnam(tmp)) {
+            wa_device b2;
+            const wa_keypair *k2;
+            ok = wa_device_save(&bob, tmp) == 0 && wa_device_load(&b2, tmp) == 0 &&
+                 b2.one_time_count == 5 && (k2 = wa_device_find_prekey(&b2, ids[2])) != NULL &&
+                 memcmp(k2->pub, pubs[2], 32) == 0;
+            remove(tmp);
+        } else ok = 0;
+    }
+    return ok;
+}
+
 int main(void)
 {
     wa_set_log_sink(log_sink);
@@ -104,7 +180,8 @@ int main(void)
     check("relay <relay> node parse (endpoints/tokens/hbh_key)", wa_relay_selftest() == 0);
     check("Signal session (X3DH + Double Ratchet, A<->B + out-of-order)", wa_signal_selftest() == 0);
     check("messaging (text + call-key + DM fanout node)", wa_message_selftest() == 0);
-    check("usync device list + prekey bundle parse", wa_user_selftest() == 0);
+    check("usync device list + prekey bundle parse + upload IQ shape", wa_user_selftest() == 0);
+    check("one-time prekey upload/decrypt flow (gen -> header id -> find -> decrypt -> persist)", test_prekey_flow());
     check("Signal session store (put/get/persist)", wa_sessions_selftest() == 0);
     check("MLow range decoder (ec_dec: icdf/bits/bit_logp/uint/cdf, 2000+1500 ops)", wa_mlow_rc_selftest() == 0);
     check("MLow TOC parse (all 256 bytes)", wa_mlow_toc_selftest() == 0);
