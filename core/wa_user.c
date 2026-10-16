@@ -206,16 +206,16 @@ int wa_user_selftest(void)
     uint8_t up_pubs[2][32];
     for (int i = 0; i < 32; i++) { up_pubs[0][i] = (uint8_t)i; up_pubs[1][i] = (uint8_t)(i + 9); }
     wa_node *up = wa_user_build_upload_prekeys_iq(0x1234, ident, 3, spk, sig, up_ids, (const uint8_t (*)[32])up_pubs, 2);
-    wa_node *reg = wa_node_child(up, "registration");
-    wa_node *ty = wa_node_child(up, "type");
-    wa_node *idn = wa_node_child(up, "identity");
-    wa_node *lst = wa_node_child(up, "list");
-    wa_node *sk = wa_node_child(up, "skey");
-    ok = up && reg && reg->content_len == 4 && ty && ty->content_len == 1 && ty->content[0] == 5 &&
-         idn && idn->content_len == 32 && memcmp(idn->content, ident, 32) == 0 &&
-         lst && lst->nchildren == 2 && sk;
+    wa_node *up_reg = wa_node_child(up, "registration");
+    wa_node *up_ty = wa_node_child(up, "type");
+    wa_node *up_idn = wa_node_child(up, "identity");
+    wa_node *up_lst = wa_node_child(up, "list");
+    wa_node *up_sk = wa_node_child(up, "skey");
+    ok = up && up_reg && up_reg->content_len == 4 && up_ty && up_ty->content_len == 1 && up_ty->content[0] == 5 &&
+         up_idn && up_idn->content_len == 32 && memcmp(up_idn->content, ident, 32) == 0 &&
+         up_lst && up_lst->nchildren == 2 && up_sk;
     if (ok) {
-        wa_node *k0 = lst->children[0];
+        wa_node *k0 = up_lst->children[0];
         wa_node *k0id = wa_node_child(k0, "id");
         wa_node *k0val = wa_node_child(k0, "value");
         ok = wa_node_tag_is(k0, "key") && k0id && k0id->content_len == 3 &&
@@ -223,11 +223,11 @@ int wa_user_selftest(void)
              k0val && k0val->content_len == 32 && memcmp(k0val->content, up_pubs[0], 32) == 0;
     }
     if (ok) {
-        wa_node *skid = wa_node_child(sk, "id");
-        wa_node *skval = wa_node_child(sk, "value");
-        wa_node *sksig = wa_node_child(sk, "signature");
-        ok = skid && skid->content_len == 3 && skid->content[2] == 3 &&
-             skval && skval->content_len == 32 && sksig && sksig->content_len == 64;
+        wa_node *up_skid = wa_node_child(up_sk, "id");
+        wa_node *up_skval = wa_node_child(up_sk, "value");
+        wa_node *up_sksig = wa_node_child(up_sk, "signature");
+        ok = up_skid && up_skid->content_len == 3 && up_skid->content[2] == 3 &&
+             up_skval && up_skval->content_len == 32 && up_sksig && up_sksig->content_len == 64;
     }
     wa_node_free(up);
     if (!ok) { wa_log("user selftest: upload-prekeys IQ shape failed"); return -1; }
