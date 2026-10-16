@@ -5,6 +5,8 @@
 #import "UI/WATheme.h"
 #import "UI/WAPairViewController.h"
 #import "UI/WAChatsViewController.h"
+#import "UI/WAChatViewController.h"
+#import <QuartzCore/QuartzCore.h>
 
 @implementation WAAppDelegate
 
@@ -40,6 +42,45 @@
 
 - (void)showPairing { [self setRoot:[[WAPairViewController alloc] init]]; }
 - (void)showChats { [self setRoot:[[WAChatsViewController alloc] init]]; }
+
+// ---- debug URL scheme (wazzup://) for headless verification over SSH via `uiopen` ----
+//   wazzup://shot            -> write a PNG of the current screen to Documents/wa6-shot.png
+//   wazzup://open?jid=<jid>  -> pop to the chat list and open that conversation (so it can then be shot)
+- (BOOL)handleDebugURL:(NSURL *)url
+{
+    NSString *cmd = url.host;
+    if ([cmd isEqualToString:@"shot"]) {
+        UIWindow *w = self.window;
+        UIGraphicsBeginImageContextWithOptions(w.bounds.size, NO, 0);
+        [w.layer renderInContext:UIGraphicsGetCurrentContext()];
+        UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        NSData *png = img ? UIImagePNGRepresentation(img) : nil;
+        if (png) [png writeToFile:[WADocumentsPath() stringByAppendingPathComponent:@"wa6-shot.png"] atomically:YES];
+        WALog(@"debug shot: %lu bytes", (unsigned long)png.length);
+        return YES;
+    }
+    if ([cmd isEqualToString:@"open"]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"])
+                jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (jid.length && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+            UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+            [nav popToRootViewControllerAnimated:NO];
+            NSString *name = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+            [nav pushViewController:[[WAChatViewController alloc] initWithJID:jid name:name] animated:NO];
+            WALog(@"debug open: %@", jid);
+        }
+        return YES;
+    }
+    return NO;
+}
+
+- (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url { return [self handleDebugURL:url]; }
+- (BOOL)application:(UIApplication *)application openURL:(NSURL *)url sourceApplication:(NSString *)src annotation:(id)ann { return [self handleDebugURL:url]; }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
