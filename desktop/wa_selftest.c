@@ -93,7 +93,7 @@ static int test_payload(void)
 int main(void)
 {
     wa_set_log_sink(log_sink);
-    printf("WhatsApp6 core self-test\n");
+    printf("Wazzup core self-test\n");
     check("crypto (Curve25519/XEdDSA, HKDF, AES-GCM/CBC)", wa_crypto_selftest() == 0);
     check("binary node round trip", wa_node_selftest() == 0);
     check("protobuf writer/reader", test_proto());

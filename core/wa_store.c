@@ -187,7 +187,7 @@ static void build_user_agent(wa_buf *ua)
     wa_buf_free(&av);
 }
 
-// DeviceProps: os="WhatsApp6", version 0.1.0, platformType=CHROME(1), requireFullSync=false
+// DeviceProps: os="Wazzup", version 0.1.0, platformType=CHROME(1), requireFullSync=false
 static void build_device_props(wa_buf *dp)
 {
     wa_buf av;
@@ -195,7 +195,7 @@ static void build_device_props(wa_buf *dp)
     pb_put_varint(&av, 1, 0);
     pb_put_varint(&av, 2, 1);
     pb_put_varint(&av, 3, 0);
-    pb_put_string(dp, 1, "WhatsApp6");
+    pb_put_string(dp, 1, "Wazzup");
     pb_put_message(dp, 2, &av);
     pb_put_varint(dp, 3, 1);        // platformType CHROME
     pb_put_bool(dp, 4, 0);          // requireFullSync

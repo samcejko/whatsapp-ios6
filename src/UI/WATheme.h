@@ -1,4 +1,4 @@
-// Skeuomorphic iOS 6 look for WhatsApp6: glossy teal bars, chat wallpaper, speech bubbles.
+// Skeuomorphic iOS 6 look for Wazzup: glossy teal bars, chat wallpaper, speech bubbles.
 #import <UIKit/UIKit.h>
 
 @interface WATheme : NSObject

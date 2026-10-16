@@ -1,4 +1,4 @@
-# Desktop build of the WhatsApp6 core (Linux/macOS), for the offline self-tests and the pairing CLI.
+# Desktop build of the Wazzup core (Linux/macOS), for the offline self-tests and the pairing CLI.
 # mbedTLS sources are expected under ../vendor/mbedtls (fetched by CI or by hand), configured with
 # ../vendor/mbedtls_config_host.h. Monocypher is vendored in-tree.
 #

@@ -15,6 +15,7 @@
     AudioUnit _unit;
     OpusEncoder *_enc;
     OpusDecoder *_dec;
+    wa_mlow_decoder _mlow;   // MLow (WhatsApp default) inbound decoder, stateful across frames
     // playback jitter ring of PCM frames
     int16_t _ring[WA_JITTER_FRAMES][WA_FRAME];
     int _ringHead, _ringTail;
@@ -26,6 +27,7 @@
 {
     if ((self = [super init])) {
         pthread_mutex_init(&_ringLock, NULL);
+        wa_mlow_decoder_init(&_mlow);
         int err = 0;
         _enc = opus_encoder_create(WA_SR, 1, OPUS_APPLICATION_VOIP, &err);
         _dec = opus_decoder_create(WA_SR, 1, &err);
@@ -90,10 +92,23 @@
         break;
     }
     case WA_MLOW_SMPL: {
-        // MLow smpl DSP decode is the staged port in core/wa_mlow*; until it lands, fill to hold timing
-        int16_t z[WA_FRAME];
-        memset(z, 0, sizeof z);
-        [self pushPCM:z];
+        // MLow (WhatsApp's default inbound codec): decode to 60 ms of float PCM, then push as 20 ms frames.
+        float pcm[WA_MLOW_FRAME_SAMPLES];
+        int n = wa_mlow_decode_payload(&_mlow, b, (int)frame.length, pcm, WA_MLOW_FRAME_SAMPLES);
+        if (n <= 0) {   // -1 => actually a std-Opus frame; fall back to the Opus decoder
+            [self playOpusFrame:frame];
+            break;
+        }
+        int16_t out[WA_FRAME];
+        for (int off = 0; off + WA_FRAME <= n; off += WA_FRAME) {
+            for (int i = 0; i < WA_FRAME; i++) {
+                float v = pcm[off + i];
+                if (v > 1.0f) v = 1.0f;
+                else if (v < -1.0f) v = -1.0f;
+                out[i] = (int16_t)(v * 32767.0f);
+            }
+            [self pushPCM:out];
+        }
         break;
     }
     }

@@ -7,7 +7,7 @@ void WALog(NSString *fmt, ...)
     va_start(ap, fmt);
     NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap];
     va_end(ap);
-    NSLog(@"[WhatsApp6] %@", s);
+    NSLog(@"[Wazzup] %@", s);
 }
 
 NSString *WADocumentsPath(void)

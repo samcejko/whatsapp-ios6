@@ -1,4 +1,4 @@
-# WhatsApp6
+# Wazzup
 
 An unofficial WhatsApp client for jailbroken **iOS 6**, built as a WhatsApp **linked device** (the same role as
 WhatsApp Web and WhatsApp Desktop) — no proxy or server of any kind, everything runs inside the app. A hobby

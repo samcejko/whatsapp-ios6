@@ -10,15 +10,15 @@
 		<string>cs</string>
 	</array>
 	<key>CFBundleDisplayName</key>
-	<string>WhatsApp6</string>
+	<string>Wazzup</string>
 	<key>CFBundleExecutable</key>
-	<string>WhatsApp6</string>
+	<string>Wazzup</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.samcejko.whatsapp6</string>
+	<string>com.samcejko.wazzup</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>WhatsApp6</string>
+	<string>Wazzup</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
@@ -107,10 +107,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.samcejko.whatsapp6</string>
+			<string>com.samcejko.wazzup</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>whatsapp6</string>
+				<string>wazzup</string>
 			</array>
 		</dict>
 	</array>
@@ -128,9 +128,9 @@
 	</array>
 	<!-- system permission prompts; translated in each language's InfoPlist.strings (iOS 10+ require them) -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>WhatsApp6 uses the microphone for voice and video calls.</string>
+	<string>Wazzup uses the microphone for voice and video calls.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>WhatsApp6 uses the camera for video calls.</string>
+	<string>Wazzup uses the camera for video calls.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

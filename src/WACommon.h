@@ -1,4 +1,4 @@
-// Shared helpers for the WhatsApp6 app (class prefix WA).
+// Shared helpers for the Wazzup app (class prefix WA).
 #import <Foundation/Foundation.h>
 
 #define WALoc(key) NSLocalizedString(key, nil)

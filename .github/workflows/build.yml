@@ -1,4 +1,4 @@
-name: Build WhatsApp6 (iOS 6 armv7 + iOS 14 arm64)
+name: Build Wazzup (iOS 6 armv7 + iOS 14 arm64)
 
 on:
   push:
@@ -25,11 +25,11 @@ jobs:
           - name: ios6-armv7
             scheme: ""
             suffix: ""
-            artifact: WhatsApp6-packages
+            artifact: Wazzup-packages
           - name: ios14-arm64
             scheme: rootless
             suffix: "-arm64"
-            artifact: WhatsApp6-packages-arm64
+            artifact: Wazzup-packages-arm64
     name: ${{ matrix.name }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -111,7 +111,7 @@ jobs:
         run: |
           set -e
           rm -rf Resources/licenses && mkdir -p Resources/licenses
-          cp LICENSE Resources/licenses/WhatsApp6-LICENSE.txt
+          cp LICENSE Resources/licenses/Wazzup-LICENSE.txt
           cp THIRD-PARTY-NOTICES.md Resources/licenses/THIRD-PARTY-NOTICES.txt
           cp vendor/mbedtls/LICENSE Resources/licenses/mbedtls-LICENSE.txt
           cp vendor/opus/COPYING Resources/licenses/opus-COPYING.txt
@@ -172,11 +172,11 @@ jobs:
           if [ -n "${{ matrix.scheme }}" ]; then export THEOS_PACKAGE_SCHEME="${{ matrix.scheme }}"; fi
           make clean || true
           make package FINALPACKAGE=1 -j"$(nproc)" -k 2>&1 | tee build.log
-          APP=$(find .theos/_ -type d -name WhatsApp6.app | head -n1)
+          APP=$(find .theos/_ -type d -name Wazzup.app | head -n1)
           test -n "$APP"
           echo "APP=$APP" >> "$GITHUB_ENV"
           ls -la "$APP"
-          lipo -info "$APP/WhatsApp6" 2>/dev/null || true
+          lipo -info "$APP/Wazzup" 2>/dev/null || true
 
       - name: Make IPA
         run: |
@@ -185,11 +185,11 @@ jobs:
           LDID=$(command -v ldid || find "$THEOS" -type f -name ldid | head -n1)
           ENT=entitlements.xml
           if [ -n "${{ matrix.scheme }}" ]; then ENT=entitlements-arm64.xml; fi
-          "$LDID" -S"$GITHUB_WORKSPACE/$ENT" "$APP/WhatsApp6"
+          "$LDID" -S"$GITHUB_WORKSPACE/$ENT" "$APP/Wazzup"
           VERSION=$(grep '^Version:' control | cut -d' ' -f2)
           rm -rf /tmp/ipa && mkdir -p /tmp/ipa/Payload packages
           cp -a "$APP" /tmp/ipa/Payload/
-          (cd /tmp/ipa && zip -qr9 "$GITHUB_WORKSPACE/packages/WhatsApp6-$VERSION${{ matrix.suffix }}.ipa" Payload)
+          (cd /tmp/ipa && zip -qr9 "$GITHUB_WORKSPACE/packages/Wazzup-$VERSION${{ matrix.suffix }}.ipa" Payload)
           ls -la packages/
 
       # The build is what the job proves. The account-wide artifact store is frequently over quota, so the upload

@@ -2,7 +2,7 @@
 
 ## 0.1.0 — the app
 
-WhatsApp6 builds as an installable iOS app (armv7 for iOS 6, arm64 for iOS 14+) with the whole protocol stack and
+Wazzup builds as an installable iOS app (armv7 for iOS 6, arm64 for iOS 14+) with the whole protocol stack and
 a skeuomorphic iOS 6 UI. CI compiles both architectures and runs the offline self-tests (10 groups, all green).
 
 ### The app (Objective-C, Theos)
@@ -40,7 +40,7 @@ a skeuomorphic iOS 6 UI. CI compiles both architectures and runs the offline sel
 - The remaining MLow smpl stages (pitch/LTP, pulses, gains, comfort-noise, LSF→LPC, CELP synthesis, post-filters)
   are a large interconnected codec: later stages rebuild the decoder's runtime memory image from seed blobs and
   the audio-synthesis vectors are only published compressed. Porting them to a verified, bit-exact decoder is a
-  multi-session effort. **It is only needed to hear the OFFICIAL client (which sends MLow); two WhatsApp6 devices
+  multi-session effort. **It is only needed to hear the OFFICIAL client (which sends MLow); two Wazzup devices
   call each other with Opus and need no MLow DSP.**
 
 ### Remaining (device, deferred by the user)

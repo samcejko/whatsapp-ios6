@@ -1,4 +1,4 @@
-name: CI (WhatsApp6 core self-tests)
+name: CI (Wazzup core self-tests)
 
 # Compiles the protocol core on an ordinary Linux runner and runs the OFFLINE self-tests only: crypto vectors,
 # the binary-node round trip, protobuf and the client payload. No network, no WhatsApp account, no media - live
