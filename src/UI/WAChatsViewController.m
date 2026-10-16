@@ -125,7 +125,8 @@
         NSString *q = [self.query lowercaseString];
         for (NSDictionary *c in self.chats) {
             if ([[c[@"name"] lowercaseString] rangeOfString:q].location != NSNotFound ||
-                [c[@"jid"] rangeOfString:q].location != NSNotFound) [self.filtered addObject:c];
+                [c[@"jid"] rangeOfString:q].location != NSNotFound ||
+                [[c[@"last"] lowercaseString] rangeOfString:q].location != NSNotFound) [self.filtered addObject:c];
         }
     }
     self.empty.hidden = [self rows].count > 0;

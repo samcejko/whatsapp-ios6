@@ -5,6 +5,7 @@
 #import "../WACommon.h"
 #import "../WASession.h"
 #import "../WAChatStore.h"
+#import "../WAAudioPlayer.h"
 #import <QuartzCore/QuartzCore.h>
 #include "wa_history.h"   // WA_MSG_* kinds
 
@@ -80,10 +81,22 @@
     [nc addObserver:self selector:@selector(kbShow:) name:UIKeyboardWillShowNotification object:nil];
     [nc addObserver:self selector:@selector(kbHide:) name:UIKeyboardWillHideNotification object:nil];
     [nc addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
+    [nc addObserver:self selector:@selector(onAudioPlayerState:) name:WAAudioPlayerStateChanged object:nil];
 
     [self loadMessages];
     [self.table reloadData];
     [self scrollToBottom];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [[WAAudioPlayer shared] stop];
+}
+
+- (void)onAudioPlayerState:(NSNotification *)n
+{
+    [self.table reloadData];
 }
 
 // the digits of a JID's user part (device suffix / server stripped), matching WAChatStore's canonical key
@@ -106,10 +119,27 @@ static NSString *durationStr(unsigned int secs)
     NSString *caption = m[@"text"];
     if (kind == WA_MSG_TEXT) return caption.length ? caption : @"";
 
+    if (kind == WA_MSG_AUDIO) {
+        WAAudioPlayer *ap = [WAAudioPlayer shared];
+        BOOL isThis = [ap.currentMsgId length] && [ap.currentMsgId isEqualToString:m[@"id"]];
+        NSMutableString *s = [NSMutableString string];
+        if (isThis && ap.isPlaying) {
+            [s appendFormat:@"⏸ %@ · %@ / %@", WALoc(@"media_voice"), durationStr((unsigned int)ap.currentTime), durationStr([m[@"dur"] unsignedIntValue])];
+        } else if (isThis && ap.isPaused) {
+            [s appendFormat:@"▶️ %@ · %@ / %@", WALoc(@"media_voice"), durationStr((unsigned int)ap.currentTime), durationStr([m[@"dur"] unsignedIntValue])];
+        } else {
+            [s appendFormat:@"▶️ %@", WALoc(@"media_voice")];
+            if ([m[@"dur"] unsignedIntValue] > 0)
+                [s appendFormat:@" · %@", durationStr([m[@"dur"] unsignedIntValue])];
+        }
+        if (caption.length) [s appendFormat:@"\n%@", caption];
+        return s;
+    }
+
     NSMutableString *s = [NSMutableString string];
     if (kind == WA_MSG_DOCUMENT && [m[@"file"] length]) [s appendFormat:@"\U0001F4C4 %@", m[@"file"]];
     else [s appendString:[WAChatStore mediaLabelForKind:kind]];
-    if ((kind == WA_MSG_AUDIO || kind == WA_MSG_VIDEO) && [m[@"dur"] unsignedIntValue] > 0)
+    if (kind == WA_MSG_VIDEO && [m[@"dur"] unsignedIntValue] > 0)
         [s appendFormat:@" · %@", durationStr([m[@"dur"] unsignedIntValue])];
     if (caption.length) [s appendFormat:@"\n%@", caption];
     return s;
@@ -136,8 +166,8 @@ static NSString *durationStr(unsigned int secs)
         if ([m[@"id"] length]) d[@"id"] = m[@"id"];
         d[@"display"] = [self displayTextFor:m];
         if (self.isGroup && ![m[@"out"] boolValue] && [m[@"sender"] length]) d[@"sender"] = m[@"sender"];
-        // carry media refs for the full-screen viewer
-        for (NSString *k in @[ @"thumb", @"dpath", @"mkey", @"esha" ]) if (m[k]) d[k] = m[k];
+        // carry media refs for the full-screen viewer and audio player
+        for (NSString *k in @[ @"thumb", @"dpath", @"mkey", @"esha", @"dur", @"file", @"audio_data" ]) if (m[k]) d[k] = m[k];
         int kind = [m[@"kind"] intValue];
         NSData *thumb = m[@"thumb"];
         if ((kind == WA_MSG_IMAGE || kind == WA_MSG_VIDEO) && [thumb isKindOfClass:[NSData class]] && thumb.length) {
@@ -245,7 +275,8 @@ static NSString *durationStr(unsigned int secs)
     if (m[@"sep"]) return 34;
     CGFloat maxW = self.view.bounds.size.width * 0.72 - 24;
     CGSize thumb = [self thumbSizeFor:m];
-    CGSize ts = [self textSize:m[@"display"] maxWidth:maxW];
+    NSString *display = ([m[@"kind"] intValue] == WA_MSG_AUDIO) ? [self displayTextFor:m] : m[@"display"];
+    CGSize ts = [self textSize:display maxWidth:maxW];
     CGFloat senderH = [m[@"sender"] length] ? 16 : 0;
     CGFloat contentH = senderH + thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
     return MAX(contentH, 18) + 14 + 16;   // content + time row + vertical padding
@@ -279,7 +310,7 @@ static NSString *durationStr(unsigned int secs)
         return cell;
     }
     BOOL out = [m[@"out"] boolValue];
-    NSString *text = m[@"display"];
+    NSString *text = ([m[@"kind"] intValue] == WA_MSG_AUDIO) ? [self displayTextFor:m] : m[@"display"];
     CGFloat w = self.view.bounds.size.width, maxW = w * 0.72 - 24;
 
     NSString *sender = m[@"sender"];
@@ -419,6 +450,10 @@ static NSString *durationStr(unsigned int secs)
         WAMediaViewController *v = [[WAMediaViewController alloc] initWithMessage:m];
         v.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
         [self presentViewController:v animated:YES completion:nil];
+        return;
+    }
+    if ([m[@"kind"] intValue] == WA_MSG_AUDIO) {
+        [[WAAudioPlayer shared] playOrToggleMessage:m];
         return;
     }
     if ([m[@"out"] boolValue] && [m[@"status"] intValue] == WAMessageStatusError) {
