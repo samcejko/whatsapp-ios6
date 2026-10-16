@@ -249,7 +249,7 @@ void wa_mlow_reconstruct_nlsf(int stage1, int config, int grid, const int32_t st
 
     if (grid == 16) {
         float base[ORD];
-        const float *base_tbl = g_mean[1 - stage1];   // Grid16W[v] = mean[1-v]
+        const float *base_tbl = g_mean[stage1];        // Grid16W[1-stage1] = mean[stage1] (the synth's inverted selection)
         float alpha = g_reg_cond[stage1];              // Grid16Alpha[v] = reg_cond[v]
         for (int k = 0; k < ORD; k++) {
             float pv = prev_nlsf ? prev_nlsf[k] : 0.0f;

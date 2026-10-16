@@ -4,6 +4,7 @@
 #import <AVFoundation/AVFoundation.h>
 #include "opus.h"
 #include "wa_mlow.h"
+#include "wa_mlow_decoder.h"
 #include <pthread.h>
 
 #define WA_SR 16000
