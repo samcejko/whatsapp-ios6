@@ -103,11 +103,20 @@ static void cb_node(void *ctx, const wa_node *node)
                 if (!jid) continue;   // stringWithUTF8String returns nil on invalid UTF-8; skip rather than crash
                 NSString *name = cv->name ? [NSString stringWithUTF8String:cv->name] : nil;
                 NSString *last = cv->last ? [NSString stringWithUTF8String:cv->last] : nil;
+                NSMutableArray *msgs = [NSMutableArray arrayWithCapacity:cv->nmsgs];
+                for (int j = 0; j < cv->nmsgs; j++) {
+                    wa_history_msg *mm = &cv->msgs[j];
+                    NSString *mt = mm->text ? [NSString stringWithUTF8String:mm->text] : nil;
+                    if (!mt) continue;   // skip entries with invalid UTF-8
+                    [msgs addObject:@{ @"text": mt, @"out": @(mm->from_me != 0), @"ts": @(mm->timestamp),
+                                       @"id": (mm->id ? [NSString stringWithUTF8String:mm->id] : @"") ?: @"" }];
+                }
                 [convs addObject:@{ @"jid": jid,
                                     @"name": name ?: @"",
                                     @"last": last ?: @"",
                                     @"ts": @(cv->timestamp),
-                                    @"unread": @(cv->unread) }];
+                                    @"unread": @(cv->unread),
+                                    @"messages": msgs }];
             }
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionConversations object:self userInfo:@{ @"conversations": convs }];

@@ -3,6 +3,7 @@
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
+#import "../WAChatStore.h"
 
 @interface WAChatViewController ()
 @property (nonatomic, copy) NSString *jid;
@@ -72,21 +73,34 @@
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(kbShow:) name:UIKeyboardWillShowNotification object:nil];
     [nc addObserver:self selector:@selector(kbHide:) name:UIKeyboardWillHideNotification object:nil];
-    [nc addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
+    [nc addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
+
+    [self loadMessages];
+    [self.table reloadData];
+    [self scrollToBottom];
 }
 
-// match two JIDs by their user (digits before @ / :)
-static BOOL sameUser(NSString *a, NSString *b)
+// the digits of a JID's user part (device suffix / server stripped), matching WAChatStore's canonical key
+static NSString *jidKey(NSString *jid)
 {
-    NSString *ua = [[a componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
-    NSString *ub = [[b componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
-    return ua.length && [ua isEqualToString:ub];
+    NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    NSString *d = [[user componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
+    return d.length ? d : jid;
 }
 
-- (void)onMessage:(NSNotification *)n
+// Load this chat's history (and any live messages) from the persistent store, keeping the @{text,out} shape the cells use.
+- (void)loadMessages
 {
-    if (!sameUser(n.userInfo[@"from"], self.jid)) return;
-    [self.messages addObject:@{ @"text": n.userInfo[@"text"] ?: @"", @"out": @NO }];
+    [self.messages removeAllObjects];
+    for (NSDictionary *m in [[WAChatStore shared] messagesForJID:self.jid])
+        [self.messages addObject:@{ @"text": m[@"text"] ?: @"", @"out": m[@"out"] ?: @NO }];
+}
+
+- (void)onStoreChanged:(NSNotification *)n
+{
+    NSString *changed = n.userInfo[@"jid"];
+    if (changed.length && ![changed isEqualToString:jidKey(self.jid)]) return;   // a different chat changed
+    [self loadMessages];
     [self.table reloadData];
     [self scrollToBottom];
 }
@@ -121,10 +135,8 @@ static BOOL sameUser(NSString *a, NSString *b)
 {
     NSString *text = [self.field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!text.length) return;
-    [self.messages addObject:@{ @"text": text, @"out": @YES }];
     self.field.text = @"";
-    [self.table reloadData];
-    [self scrollToBottom];
+    [[WAChatStore shared] recordOutgoing:text toJID:self.jid];   // persists + posts WAChatStoreChanged -> reloads the bubbles
     [[WASession shared] sendText:text toJID:self.jid];
     WALog(@"send to %@: %lu chars", self.jid, (unsigned long)text.length);
 }

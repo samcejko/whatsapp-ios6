@@ -36,8 +36,11 @@
 #define F_CONV_NAME                13
 #define F_CONV_DISPLAYNAME         38
 #define F_HSM_MESSAGE               1
+#define F_WMI_KEY                    1
 #define F_WMI_MESSAGE               2
 #define F_WMI_MESSAGETIMESTAMP      3
+#define F_KEY_FROMME                2
+#define F_KEY_ID                    3
 
 #define HISTORY_MEDIA_HOST   "mmg.whatsapp.net"
 #define HISTORY_HKDF_INFO    "WhatsApp History Keys"
@@ -48,6 +51,16 @@ static void conv_free(wa_history_conv *c)
     free(c->jid);
     free(c->name);
     free(c->last);
+    for (int i = 0; i < c->nmsgs; i++) { free(c->msgs[i].text); free(c->msgs[i].id); }
+    free(c->msgs);
+}
+
+static int msg_cmp_ts(const void *a, const void *b)
+{
+    const wa_history_msg *x = (const wa_history_msg *)a, *y = (const wa_history_msg *)b;
+    if (x->timestamp < y->timestamp) return -1;
+    if (x->timestamp > y->timestamp) return 1;
+    return 0;
 }
 
 void wa_history_result_free(wa_history_result *r)
@@ -75,12 +88,13 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
     uint64_t unread = 0;
     if (pb_get_varint(c, cl, F_CONV_UNREAD, &unread)) out->unread = (uint32_t)unread;
 
-    // The last message's text: scan the repeated messages (HistorySyncMsg), keep the newest that carries text.
+    // Collect the text messages: scan the repeated messages (HistorySyncMsg), pulling each WebMessageInfo's text,
+    // timestamp and fromMe. Non-text messages (media, system, …) are skipped for now.
+    wa_history_msg *msgs = NULL;
+    int n = 0, mcap = 0;
     pb_reader r;
     pb_reader_init(&r, c, cl);
     pb_field f;
-    uint64_t best_ts = 0;
-    char *best_text = NULL;
     int rc;
     while ((rc = pb_next(&r, &f)) > 0) {
         if (f.field != F_CONV_MESSAGES || f.wire != PB_BYTES) continue;
@@ -91,15 +105,39 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
         size_t innerl;
         char *text = NULL;
         if (pb_get_bytes(wmi, wmil, F_WMI_MESSAGE, &inner, &innerl)) text = wa_msg_parse_text(inner, innerl);
+        if (!text) continue;   // text-only for now
         uint64_t mts = 0;
         pb_get_varint(wmi, wmil, F_WMI_MESSAGETIMESTAMP, &mts);
-        if (text) {
-            if (!best_text || mts >= best_ts) { free(best_text); best_text = text; best_ts = mts; }
-            else free(text);
+        int from_me = 0;
+        char *mid = NULL;
+        const uint8_t *key;
+        size_t keyl;
+        if (pb_get_bytes(wmi, wmil, F_WMI_KEY, &key, &keyl)) {
+            uint64_t fm = 0;
+            if (pb_get_varint(key, keyl, F_KEY_FROMME, &fm)) from_me = fm ? 1 : 0;
+            mid = pb_get_string(key, keyl, F_KEY_ID);
         }
+        if (n >= mcap) {
+            int ncap = mcap ? mcap * 2 : 16;
+            wa_history_msg *p = (wa_history_msg *)realloc(msgs, (size_t)ncap * sizeof *p);
+            if (!p) { free(text); free(mid); break; }
+            msgs = p;
+            mcap = ncap;
+        }
+        msgs[n].text = text;
+        msgs[n].id = mid;
+        msgs[n].timestamp = mts;
+        msgs[n].from_me = from_me;
+        n++;
+        if (n >= 4096) break;   // defensive per-conversation cap
     }
-    out->last = best_text;
-    if (out->timestamp == 0 && best_ts) out->timestamp = best_ts;
+    if (n > 1) qsort(msgs, (size_t)n, sizeof *msgs, msg_cmp_ts);   // oldest-first for display
+    out->msgs = msgs;
+    out->nmsgs = n;
+    if (n > 0) {
+        out->last = wa_strdup(msgs[n - 1].text);
+        if (out->timestamp == 0) out->timestamp = msgs[n - 1].timestamp;
+    }
     return 0;
 }
 
@@ -322,6 +360,10 @@ static int st_convs_ok(const wa_history_result *r)
     if (!a->last || strcmp(a->last, "Ahoj, jak se mas?") != 0) return 0;
     if (!b->name || strcmp(b->name, "Parta") != 0) return 0;
     if (!b->last || strcmp(b->last, "Hi group") != 0) return 0;
+    // the per-conversation message history must be parsed too (one text message each, from the peer)
+    if (a->nmsgs != 1 || !a->msgs || !a->msgs[0].text || strcmp(a->msgs[0].text, "Ahoj, jak se mas?") != 0 ||
+        a->msgs[0].from_me != 0 || !a->msgs[0].id || strcmp(a->msgs[0].id, "ID1") != 0) return 0;
+    if (b->nmsgs != 1 || !b->msgs || !b->msgs[0].text || strcmp(b->msgs[0].text, "Hi group") != 0) return 0;
     return 1;
 }
 

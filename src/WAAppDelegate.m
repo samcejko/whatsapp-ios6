@@ -1,6 +1,7 @@
 #import "WAAppDelegate.h"
 #import "WACommon.h"
 #import "WASession.h"
+#import "WAChatStore.h"
 #import "UI/WATheme.h"
 #import "UI/WAPairViewController.h"
 #import "UI/WAChatsViewController.h"
@@ -13,6 +14,8 @@
     self.window.backgroundColor = [UIColor whiteColor];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPaired:) name:WASessionPaired object:nil];
+
+    [WAChatStore shared];   // start observing history-sync + message notifications before the session connects
 
     if ([WASession shared].registered) [self showChats];
     else [self showPairing];

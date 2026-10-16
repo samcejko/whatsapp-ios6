@@ -13,14 +13,24 @@
 extern "C" {
 #endif
 
-// One conversation surfaced from a HistorySync chunk. The strings are malloc'd (name/last may be NULL) and owned by
-// the wa_history_result; free the whole result with wa_history_result_free.
+// One text message from a conversation's history. Strings are malloc'd (id may be NULL).
+typedef struct {
+    char *text;          // message text (conversation / extendedTextMessage)
+    char *id;            // message id (MessageKey.id), or NULL
+    uint64_t timestamp;  // messageTimestamp (seconds)
+    int from_me;         // 1 when we sent it (MessageKey.fromMe)
+} wa_history_msg;
+
+// One conversation surfaced from a HistorySync chunk. The strings/arrays are malloc'd (name/last/msgs may be NULL)
+// and owned by the wa_history_result; free the whole result with wa_history_result_free.
 typedef struct {
     char *jid;           // conversation id (remote JID), e.g. "4915...@s.whatsapp.net" or "...@g.us"
     char *name;          // display name (Conversation.name / .displayName), or NULL
     char *last;          // text of the most recent message, or NULL
     uint64_t timestamp;  // conversationTimestamp / lastMsgTimestamp / newest messageTimestamp (seconds) for sorting
     uint32_t unread;     // unreadCount, or 0
+    wa_history_msg *msgs; // text messages, oldest-first (NULL when none)
+    int nmsgs;
 } wa_history_conv;
 
 typedef struct {

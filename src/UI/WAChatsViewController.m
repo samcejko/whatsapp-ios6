@@ -3,6 +3,7 @@
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
+#import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
 
 @interface WAChatsViewController ()
@@ -49,8 +50,8 @@
     [self.view addSubview:self.empty];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onState:) name:WASessionStateChanged object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onConversations:) name:WASessionConversations object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadFromStore) name:WAChatStoreChanged object:nil];
+    [self reloadFromStore];
     [self refreshBanner:[WASession shared].state];
 }
 
@@ -61,50 +62,17 @@
     return [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
 }
 
-// Upsert one chat row (keyed by jid). Does NOT reload; call reloadSorted after a batch.
-- (void)upsertJID:(NSString *)jid name:(NSString *)name last:(NSString *)last ts:(unsigned long long)ts
+// The chat list is whatever the persistent store holds (history-sync conversations + live messages), newest-first.
+- (void)reloadFromStore
 {
-    if (!jid.length) return;
-    int found = -1;
-    for (NSUInteger i = 0; i < self.chats.count; i++) if ([self.chats[i][@"jid"] isEqualToString:jid]) { found = (int)i; break; }
-    NSDictionary *row = @{ @"jid": jid,
-                          @"name": [self displayNameFor:jid name:name],
-                          @"last": last ?: @"",
-                          @"ts": @(ts) };
-    if (found >= 0) [self.chats replaceObjectAtIndex:found withObject:row];
-    else [self.chats addObject:row];
-}
-
-// Sort newest-first by timestamp (0 timestamps keep their relative order at the bottom), then redraw.
-- (void)reloadSorted
-{
-    [self.chats sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        unsigned long long ta = [a[@"ts"] unsignedLongLongValue], tb = [b[@"ts"] unsignedLongLongValue];
-        if (ta == tb) return NSOrderedSame;
-        return ta > tb ? NSOrderedAscending : NSOrderedDescending;
-    }];
+    [self.chats removeAllObjects];
+    for (NSDictionary *row in [[WAChatStore shared] conversationsSorted]) {
+        [self.chats addObject:@{ @"jid": row[@"jid"] ?: @"",
+                                 @"name": [self displayNameFor:row[@"jid"] name:row[@"name"]],
+                                 @"last": row[@"last"] ?: @"" }];
+    }
     self.empty.hidden = self.chats.count > 0;
     [self.table reloadData];
-}
-
-- (void)onMessage:(NSNotification *)n
-{
-    NSString *from = n.userInfo[@"from"] ?: @"";
-    NSString *text = n.userInfo[@"text"] ?: @"";
-    // A live message is the newest thing in that chat: stamp it with "now" so it sorts to the top.
-    [self upsertJID:from name:nil last:text ts:(unsigned long long)[[NSDate date] timeIntervalSince1970]];
-    [self reloadSorted];
-}
-
-// A history-sync chunk: fill/merge the chat list with the user's existing conversations.
-- (void)onConversations:(NSNotification *)n
-{
-    NSArray *convs = n.userInfo[@"conversations"];
-    if (![convs isKindOfClass:[NSArray class]]) return;
-    for (NSDictionary *c in convs) {
-        [self upsertJID:c[@"jid"] name:c[@"name"] last:c[@"last"] ts:[c[@"ts"] unsignedLongLongValue]];
-    }
-    [self reloadSorted];
 }
 
 - (void)viewDidLayoutSubviews
