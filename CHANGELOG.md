@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### UI Overhaul & Polish (Spot6/Gramify level)
+- Redesigned chat bubbles: genuine WhatsApp-style green outgoing / white incoming bubbles with tails, message timestamps, and sent status ticks (`✓✓`).
+- Chat list enhancements: dynamic avatars with initials/glyphs (person glyph for contacts, group glyph for groups), relative timestamps (`WAListTime`), unread badges, and live search bar.
+- Media in chats: inline photo/video thumbnails, media type labels with duration/filename, and a full-screen photo viewer (`WAMediaViewController`) with download & Save to Photos.
+- Chat features: date separators (Today/Yesterday/weekday chips), group sender names in distinct colors above incoming bubbles, long-press to copy message text.
+- Settings & Profile: own phone number, avatar, connection status, version footer, and clean Unlink option.
+- Swipe to delete: swipe left on any chat in the list to remove the conversation from persistent storage (`WAChatStore deleteChat:`).
+
 ### Fix: no messages after linking (one-time prekey upload)
 After pairing, the linked device never uploaded one-time prekeys, so the server held 0 keys
 (`<notification type="encrypt"><count value="0"/>`) and no peer — not even our own phone — could open a Signal
