@@ -18,6 +18,7 @@
 
 #define KEEPALIVE_MS 25000
 #define QR_ROTATE_MS 20000
+#define QR_FIRST_MS 60000
 
 struct wa_client {
     wa_device *dev;
@@ -268,7 +269,10 @@ static void handle_pair_device(wa_client *c, const wa_node *iq, const wa_node *p
     wa_log("pair-device: ref0 raw len=%d (buf=%d)", ref0_len, (int)sizeof c->refs[0]);
     c->cur_ref = 0;
     c->state = WA_PAIRING;
-    c->next_qr_us = wa_now_us() + QR_ROTATE_MS * 1000ull;
+    // WA Web keeps the FIRST ref valid for 60 s, each later one for 20 s (whatsapp-rust src/pair.rs).
+    // Rotating the first ref after only 20 s left the user scanning a ref the server still treats as the
+    // next one -> no pair-success. Match the server's schedule.
+    c->next_qr_us = wa_now_us() + QR_FIRST_MS * 1000ull;
     wa_log("pair-device: %d ref(s)", c->nref);
     if (c->nref && c->cb.on_qr) {
         char *qr = wa_pair_qr_string(c->dev, c->refs[0], '1');
@@ -570,7 +574,14 @@ wa_client_state wa_client_poll(wa_client *c, int timeout_ms)
 void wa_client_run(wa_client *c)
 {
     for (;;) {
-        if (wa_client_connect(c) != 0) return;
+        if (wa_client_connect(c) != 0) {
+            // A transient initial-connect failure used to strand the app (no retry -> no QR ever).
+            // Keep retrying with a short backoff until it connects or we're told to stop.
+            if (c->stop) return;
+            wa_log("connect failed (%s); retrying in 2s", c->error[0] ? c->error : "?");
+            wa_sleep_ms(2000);
+            continue;
+        }
         while (!c->stop && !c->reconnect_wanted) {
             wa_client_state s = wa_client_poll(c, 1000);
             if (s == WA_DISCONNECTED) break;
