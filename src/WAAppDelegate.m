@@ -6,7 +6,11 @@
 #import "UI/WAPairViewController.h"
 #import "UI/WAChatsViewController.h"
 #import "UI/WAChatViewController.h"
+#import "UI/WASettingsViewController.h"
+#import "UI/WAMediaViewController.h"
+#import "WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
+#include "wa_history.h"
 
 @implementation WAAppDelegate
 
@@ -73,6 +77,26 @@
             NSString *name = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
             [nav pushViewController:[[WAChatViewController alloc] initWithJID:jid name:name] animated:NO];
             WALog(@"debug open: %@", jid);
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"settings"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+        [nav popToRootViewControllerAnimated:NO];
+        [nav pushViewController:[[WASettingsViewController alloc] init] animated:NO];
+        return YES;
+    }
+    if ([cmd isEqualToString:@"photo"]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"]) jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        for (NSDictionary *m in [[WAChatStore shared] messagesForJID:jid]) {
+            if ([m[@"kind"] intValue] == WA_MSG_IMAGE && m[@"thumb"]) {
+                [self.window.rootViewController presentViewController:[[WAMediaViewController alloc] initWithMessage:m] animated:NO completion:nil];
+                break;
+            }
         }
         return YES;
     }
