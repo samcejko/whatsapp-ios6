@@ -14,7 +14,7 @@ CC ?= cc
 CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
 CFLAGS += -I$(CORE) -I$(CORE)/rtc -I$(VENDOR)/monocypher -I$(MBEDTLS)/include -I$(MBEDTLS)/library
 CFLAGS += -DMBEDTLS_USER_CONFIG_FILE='"mbedtls_config_host.h"' -I$(VENDOR)
-LDLIBS := -lz -lpthread
+LDLIBS := -lz -lpthread -lm
 
 # The live relay transport (wa_rtc + core/rtc gf_*) is iOS-only (arc4random, VideoToolbox, device sockets); the
 # offline self-tests don't exercise it, so it's excluded from the desktop build.
