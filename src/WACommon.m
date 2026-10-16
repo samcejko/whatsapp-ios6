@@ -45,6 +45,26 @@ NSString *WAListTime(uint64_t ts)
     return [dshort stringFromDate:date];
 }
 
+NSString *WADayLabel(uint64_t ts)
+{
+    if (!ts) return @"";
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:ts];
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSInteger u = NSDayCalendarUnit | NSMonthCalendarUnit | NSYearCalendarUnit;
+    NSDateComponents *dc = [cal components:u fromDate:date];
+    NSDateComponents *dn = [cal components:u fromDate:[NSDate date]];
+    static NSDateFormatter *wday, *dmed;
+    if (!wday) {
+        wday = [[NSDateFormatter alloc] init]; wday.dateFormat = @"EEEE";
+        dmed = [[NSDateFormatter alloc] init]; dmed.dateStyle = NSDateFormatterMediumStyle; dmed.timeStyle = NSDateFormatterNoStyle;
+    }
+    if (dc.year == dn.year && dc.month == dn.month && dc.day == dn.day) return WALoc(@"today");
+    NSTimeInterval diff = [[NSDate date] timeIntervalSinceDate:date];
+    if (diff < 2 * 86400 && dc.day != dn.day) return WALoc(@"yesterday");
+    if (diff < 7 * 86400) return [wday stringFromDate:date];
+    return [dmed stringFromDate:date];
+}
+
 // Route the C core's log sink into NSLog (never logs secrets).
 static void wa_log_to_nslog(const char *line)
 {

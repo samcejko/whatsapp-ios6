@@ -49,11 +49,14 @@
 }
 @end
 
-@interface WAChatsViewController ()
+@interface WAChatsViewController () <UISearchBarDelegate>
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UILabel *empty;
 @property (nonatomic, strong) UILabel *banner;
-@property (nonatomic, strong) NSMutableArray *chats;   // array of @{ @"jid", @"name", @"last", @"ts", @"unread" }
+@property (nonatomic, strong) UISearchBar *searchBar;
+@property (nonatomic, strong) NSMutableArray *chats;      // all chats, newest-first
+@property (nonatomic, strong) NSMutableArray *filtered;   // search results
+@property (nonatomic, copy) NSString *query;
 @end
 
 @implementation WAChatsViewController
@@ -62,7 +65,6 @@
 {
     [super viewDidLoad];
     self.title = WALoc(@"chats_title");
-    self.chats = [NSMutableArray array];
     self.view.backgroundColor = [UIColor whiteColor];
 
     self.navigationItem.leftBarButtonItem =
@@ -70,20 +72,27 @@
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newChat)];
 
+    self.chats = [NSMutableArray array];
+    self.filtered = [NSMutableArray array];
+
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
-    self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.rowHeight = 70;
     self.table.separatorColor = [UIColor colorWithWhite:0.86 alpha:1.0];
+    self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
+    self.searchBar.placeholder = WALoc(@"search");
+    self.searchBar.delegate = self;
+    self.table.tableHeaderView = self.searchBar;
     [self.view addSubview:self.table];
 
-    self.banner = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 28)];
+    self.banner = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 24)];
     self.banner.backgroundColor = [WATheme accent];
     self.banner.textColor = [UIColor whiteColor];
     self.banner.textAlignment = NSTextAlignmentCenter;
-    self.banner.font = [UIFont systemFontOfSize:13];
+    self.banner.font = [UIFont systemFontOfSize:12];
     self.banner.text = WALoc(@"status_connecting");
+    [self.view addSubview:self.banner];
 
     self.empty = [[UILabel alloc] init];
     self.empty.numberOfLines = 0;
@@ -106,6 +115,23 @@
     return [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
 }
 
+// The active rows: filtered by the search query, else all chats.
+- (NSArray *)rows { return self.query.length ? self.filtered : self.chats; }
+
+- (void)applyFilter
+{
+    [self.filtered removeAllObjects];
+    if (self.query.length) {
+        NSString *q = [self.query lowercaseString];
+        for (NSDictionary *c in self.chats) {
+            if ([[c[@"name"] lowercaseString] rangeOfString:q].location != NSNotFound ||
+                [c[@"jid"] rangeOfString:q].location != NSNotFound) [self.filtered addObject:c];
+        }
+    }
+    self.empty.hidden = [self rows].count > 0;
+    [self.table reloadData];
+}
+
 // The chat list is whatever the persistent store holds (history-sync conversations + live messages), newest-first.
 - (void)reloadFromStore
 {
@@ -117,14 +143,17 @@
                                  @"ts": row[@"ts"] ?: @0,
                                  @"unread": row[@"unread"] ?: @0 }];
     }
-    self.empty.hidden = self.chats.count > 0;
-    [self.table reloadData];
+    [self applyFilter];
 }
 
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    self.empty.frame = CGRectMake(30, 120, self.view.bounds.size.width - 60, 80);
+    CGFloat w = self.view.bounds.size.width, h = self.view.bounds.size.height;
+    CGFloat bh = self.banner.hidden ? 0 : 24;
+    self.banner.frame = CGRectMake(0, 0, w, bh);
+    self.table.frame = CGRectMake(0, bh, w, h - bh);
+    self.empty.frame = CGRectMake(30, 140, w - 60, 80);
 }
 
 - (void)refreshBanner:(WASessionState)s
@@ -137,11 +166,20 @@
     else if (s == WASessionStatePairing) t = WALoc(@"status_pairing");
     self.banner.text = t;
     self.banner.backgroundColor = col;
-    self.table.tableHeaderView = (s == WASessionStateConnected) ? nil : self.banner;
-    self.empty.hidden = self.chats.count > 0;
+    self.banner.hidden = (s == WASessionStateConnected);
+    [self.view setNeedsLayout];
+    self.empty.hidden = [self rows].count > 0;
 }
 
 - (void)onState:(NSNotification *)n { [self refreshBanner:[n.userInfo[@"state"] integerValue]]; }
+
+#pragma mark - search
+
+- (void)searchBar:(UISearchBar *)sb textDidChange:(NSString *)text { self.query = text; [self applyFilter]; }
+- (void)searchBarSearchButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+- (void)searchBarCancelButtonClicked:(UISearchBar *)sb { sb.text = @""; self.query = @""; [sb resignFirstResponder]; [self applyFilter]; }
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)sb { sb.showsCancelButton = YES; }
+- (void)searchBarTextDidEndEditing:(UISearchBar *)sb { sb.showsCancelButton = NO; }
 
 - (void)openSettings
 {
@@ -178,13 +216,13 @@
 
 #pragma mark - table
 
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.chats.count; }
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return [self rows].count; }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip
 {
     WAChatCell *cell = (WAChatCell *)[t dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[WAChatCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"c"];
-    NSDictionary *chat = self.chats[ip.row];
+    NSDictionary *chat = [self rows][ip.row];
     NSString *name = chat[@"name"];
     cell.nameLbl.text = name;
     cell.lastLbl.text = chat[@"last"];
@@ -199,7 +237,8 @@
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip
 {
     [t deselectRowAtIndexPath:ip animated:YES];
-    NSDictionary *chat = self.chats[ip.row];
+    [self.searchBar resignFirstResponder];
+    NSDictionary *chat = [self rows][ip.row];
     WAChatViewController *c = [[WAChatViewController alloc] initWithJID:chat[@"jid"] name:chat[@"name"]];
     [self.navigationController pushViewController:c animated:YES];
 }

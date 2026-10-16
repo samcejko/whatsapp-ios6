@@ -118,7 +118,15 @@ static NSString *durationStr(unsigned int secs)
 - (void)loadMessages
 {
     [self.messages removeAllObjects];
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSInteger lastDay = NSIntegerMin;
     for (NSDictionary *m in [[WAChatStore shared] messagesForJID:self.jid]) {
+        unsigned long long mts = [m[@"ts"] unsignedLongLongValue];
+        if (mts) {
+            NSInteger day = [cal ordinalityOfUnit:NSDayCalendarUnit inUnit:NSEraCalendarUnit
+                                          forDate:[NSDate dateWithTimeIntervalSince1970:mts]];
+            if (day != lastDay) { [self.messages addObject:@{ @"sep": WADayLabel(mts) }]; lastDay = day; }
+        }
         NSMutableDictionary *d = [NSMutableDictionary dictionary];
         d[@"out"] = m[@"out"] ?: @NO;
         d[@"kind"] = m[@"kind"] ?: @(WA_MSG_TEXT);
@@ -230,6 +238,7 @@ static NSString *durationStr(unsigned int secs)
 - (CGFloat)tableView:(UITableView *)t heightForRowAtIndexPath:(NSIndexPath *)ip
 {
     NSDictionary *m = self.messages[ip.row];
+    if (m[@"sep"]) return 34;
     CGFloat maxW = self.view.bounds.size.width * 0.72 - 24;
     CGSize thumb = [self thumbSizeFor:m];
     CGSize ts = [self textSize:m[@"display"] maxWidth:maxW];
@@ -249,6 +258,22 @@ static NSString *durationStr(unsigned int secs)
     }
     for (UIView *v in cell.contentView.subviews) [v removeFromSuperview];
     NSDictionary *m = self.messages[ip.row];
+    if (m[@"sep"]) {   // a centered date chip between days
+        NSString *day = m[@"sep"];
+        UIFont *df = [UIFont boldSystemFontOfSize:12];
+        CGSize ds = [day sizeWithFont:df];
+        CGFloat cw = ds.width + 22, cx = (self.view.bounds.size.width - cw) / 2;
+        UILabel *chip = [[UILabel alloc] initWithFrame:CGRectMake(cx, 6, cw, 22)];
+        chip.text = day;
+        chip.font = df;
+        chip.textAlignment = NSTextAlignmentCenter;
+        chip.textColor = [UIColor colorWithRed:0.2 green:0.35 blue:0.3 alpha:1.0];
+        chip.backgroundColor = [UIColor colorWithRed:0.86 green:0.91 blue:0.84 alpha:0.95];
+        chip.layer.cornerRadius = 11;
+        chip.clipsToBounds = YES;
+        [cell.contentView addSubview:chip];
+        return cell;
+    }
     BOOL out = [m[@"out"] boolValue];
     NSString *text = m[@"display"];
     CGFloat w = self.view.bounds.size.width, maxW = w * 0.72 - 24;

@@ -13,6 +13,8 @@ NSString *WADocumentsPath(void);
 NSString *WAClockTime(uint64_t ts);
 // Chat-list relative time: "HH:mm" today, localized "Yesterday", the weekday this week, else a short date. Empty for 0.
 NSString *WAListTime(uint64_t ts);
+// Day label for a date separator: localized "Today"/"Yesterday", the weekday this week, else a medium date.
+NSString *WADayLabel(uint64_t ts);
 #ifdef __cplusplus
 }
 #endif

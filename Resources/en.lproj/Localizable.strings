@@ -43,6 +43,8 @@
 "media_location" = "Location";
 "media_contact" = "Contact";
 "yesterday" = "Yesterday";
+"today" = "Today";
+"search" = "Search";
 "settings" = "Settings";
 "profile" = "Profile";
 "save_to_photos" = "Save to Photos";
