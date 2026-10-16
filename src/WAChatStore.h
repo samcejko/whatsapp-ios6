@@ -44,6 +44,15 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Delete a conversation and its messages (persist + notify).
 - (void)deleteChat:(NSString *)jid;
 
+// Delete a single message from a conversation (persist + notify).
+- (void)deleteMessage:(NSDictionary *)msg inChat:(NSString *)jid;
+
+// Clear all messages in a conversation (persist + notify).
+- (void)clearChat:(NSString *)jid;
+
+// Clear all messages in all conversations (persist + notify).
+- (void)clearAllChats;
+
 // Re-resolves contact names against AddressBook and push names, persists if changed.
 - (void)refreshContactNames;
 

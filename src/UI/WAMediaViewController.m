@@ -20,6 +20,14 @@
 
 - (instancetype)initWithMessage:(NSDictionary *)msg { if ((self = [super init])) { _msg = msg; } return self; }
 
+- (instancetype)initWithImage:(UIImage *)image
+{
+    if ((self = [super init])) {
+        _fullImage = image;
+    }
+    return self;
+}
+
 - (NSString *)videoCachePath
 {
     NSString *mid = self.msg[@"id"];
@@ -35,8 +43,12 @@
     self.imageView = [[UIImageView alloc] initWithFrame:self.view.bounds];
     self.imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.imageView.contentMode = UIViewContentModeScaleAspectFit;
-    NSData *thumb = self.msg[@"thumb"];
-    if ([thumb isKindOfClass:[NSData class]]) self.imageView.image = [UIImage imageWithData:thumb];
+    if (self.fullImage) {
+        self.imageView.image = self.fullImage;
+    } else {
+        NSData *thumb = self.msg[@"thumb"];
+        if ([thumb isKindOfClass:[NSData class]]) self.imageView.image = [UIImage imageWithData:thumb];
+    }
     [self.view addSubview:self.imageView];
 
     [self.view addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onViewTapped)]];
@@ -62,6 +74,11 @@
     self.spinner.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2);
     self.spinner.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     [self.view addSubview:self.spinner];
+
+    if (self.fullImage) {
+        self.saveBtn.hidden = NO;
+        return;
+    }
 
     int kind = [self.msg[@"kind"] intValue];
     if (kind == WA_MSG_VIDEO) {

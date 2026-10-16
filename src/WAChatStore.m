@@ -184,6 +184,9 @@ static NSString *msgSig(NSDictionary *m)
     if (!jid.length || ![msg isKindOfClass:[NSDictionary class]]) return;
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
     if (WAIsRawNumberOrEmpty(e[@"name"])) e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
+    if ([msg[@"pushName"] isKindOfClass:[NSString class]] && [msg[@"pushName"] length]) {
+        [self setPushName:msg[@"pushName"] forJID:jid];
+    }
     NSMutableDictionary *m = [msg mutableCopy];
     [m removeObjectForKey:@"from"];
     [self mergeMessages:@[ m ] into:e];
@@ -324,6 +327,60 @@ static NSString *msgSig(NSDictionary *m)
     NSString *key = [self keyFor:jid];
     if (!self.chats[key]) return;
     [self.chats removeObjectForKey:key];
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+}
+
+- (void)deleteMessage:(NSDictionary *)msg inChat:(NSString *)jid
+{
+    if (!jid.length || !msg) return;
+    NSString *key = [self keyFor:jid];
+    NSMutableDictionary *e = self.chats[key];
+    if (!e) return;
+    NSMutableArray *msgs = e[@"msgs"];
+    if (![msgs isKindOfClass:[NSMutableArray class]]) return;
+    NSString *targetSig = msgSig(msg);
+    BOOL found = NO;
+    for (NSInteger i = (NSInteger)msgs.count - 1; i >= 0; i--) {
+        if ([msgSig(msgs[i]) isEqualToString:targetSig]) {
+            [msgs removeObjectAtIndex:i];
+            found = YES;
+            break;
+        }
+    }
+    if (found) {
+        unsigned long long last = [[[msgs lastObject] objectForKey:@"ts"] unsignedLongLongValue];
+        e[@"ts"] = @(last);
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": key }];
+    }
+}
+
+- (void)clearChat:(NSString *)jid
+{
+    if (!jid.length) return;
+    NSString *key = [self keyFor:jid];
+    NSMutableDictionary *e = self.chats[key];
+    if (!e) return;
+    NSMutableArray *msgs = e[@"msgs"];
+    if ([msgs isKindOfClass:[NSMutableArray class]]) {
+        [msgs removeAllObjects];
+    }
+    e[@"unread"] = @(0);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": key }];
+}
+
+- (void)clearAllChats
+{
+    for (NSString *key in self.chats) {
+        NSMutableDictionary *e = self.chats[key];
+        NSMutableArray *msgs = e[@"msgs"];
+        if ([msgs isKindOfClass:[NSMutableArray class]]) {
+            [msgs removeAllObjects];
+        }
+        e[@"unread"] = @(0);
+    }
     [self save];
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
 }

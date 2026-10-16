@@ -1,6 +1,7 @@
 #import "WAChatViewController.h"
 #import "WACallViewController.h"
 #import "WAMediaViewController.h"
+#import "WAContactInfoViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
@@ -9,7 +10,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include "wa_history.h"   // WA_MSG_* kinds
 
-@interface WAChatViewController () <UIDocumentInteractionControllerDelegate>
+@interface WAChatViewController () <UIDocumentInteractionControllerDelegate, UIActionSheetDelegate>
 @property (nonatomic, copy) NSString *jid;
 @property (nonatomic) BOOL isGroup;
 @property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional), @"sender" }
@@ -22,6 +23,7 @@
 @property (nonatomic) CGFloat kbHeight;
 @property (nonatomic, strong) UIDocumentInteractionController *docController;
 @property (nonatomic, strong) UILabel *subtitleLabel;
+@property (nonatomic, strong) NSDictionary *selectedMsg;
 @end
 
 @implementation WAChatViewController
@@ -54,6 +56,8 @@
                                                  [[UIBarButtonItem alloc] initWithCustomView:call] ];
 
     UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 180, 44)];
+    tv.userInteractionEnabled = YES;
+    [tv addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openContactInfo)]];
     UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 180, 20)];
     titleLbl.text = self.title;
     titleLbl.font = [UIFont boldSystemFontOfSize:17];
@@ -577,19 +581,58 @@ static NSString *durationStr(unsigned int secs)
     return cell;
 }
 
-// Long-press a text bubble to copy it.
+- (void)openContactInfo
+{
+    WAContactInfoViewController *info = [[WAContactInfoViewController alloc] initWithJID:self.jid name:self.title];
+    [self.navigationController pushViewController:info animated:YES];
+}
+
+// Long-press a bubble to copy or delete it.
 - (void)onLongPress:(UILongPressGestureRecognizer *)g
 {
     if (g.state != UIGestureRecognizerStateBegan) return;
     NSIndexPath *ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
     if (!ip) return;
     NSDictionary *m = self.messages[ip.row];
-    NSString *text = m[@"display"];
-    if (m[@"sep"] || !text.length) return;
-    [[UIPasteboard generalPasteboard] setString:text];
-    UIAlertView *a = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"copied") delegate:nil cancelButtonTitle:nil otherButtonTitles:nil];
-    [a show];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [a dismissWithClickedButtonIndex:0 animated:YES]; });
+    if (m[@"sep"]) return;
+
+    self.selectedMsg = m;
+    NSString *preview = m[@"display"];
+    if (preview.length > 30) preview = [[preview substringToIndex:30] stringByAppendingString:@"\U2026"];
+
+    UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:(preview.length ? preview : nil)
+                                                    delegate:self
+                                           cancelButtonTitle:WALoc(@"cancel")
+                                      destructiveButtonTitle:WALoc(@"delete_message")
+                                           otherButtonTitles:WALoc(@"copy"), nil];
+    as.tag = 200;
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        UITableViewCell *cell = [self.table cellForRowAtIndexPath:ip];
+        [as showFromRect:(cell ? cell.bounds : CGRectMake(0, 0, 100, 50)) inView:(cell ?: self.view) animated:YES];
+    } else {
+        [as showInView:self.view];
+    }
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (actionSheet.tag == 200) {
+        if (buttonIndex == actionSheet.destructiveButtonIndex) {
+            if (self.selectedMsg) {
+                [[WAChatStore shared] deleteMessage:self.selectedMsg inChat:self.jid];
+                self.selectedMsg = nil;
+            }
+        } else if (buttonIndex == 1) { // Copy
+            NSString *text = self.selectedMsg[@"display"];
+            if (text.length) {
+                [[UIPasteboard generalPasteboard] setString:text];
+                UIAlertView *a = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"copied") delegate:nil cancelButtonTitle:nil otherButtonTitles:nil];
+                [a show];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [a dismissWithClickedButtonIndex:0 animated:YES]; });
+            }
+            self.selectedMsg = nil;
+        }
+    }
 }
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip

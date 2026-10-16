@@ -5,4 +5,5 @@
 @interface WAMediaViewController : UIViewController
 // msg: a chat-store message dict with @"thumb" (NSData), and optionally @"dpath"/@"mkey"/@"esha"/@"kind" for full-res.
 - (instancetype)initWithMessage:(NSDictionary *)msg;
+- (instancetype)initWithImage:(UIImage *)image;
 @end

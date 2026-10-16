@@ -182,6 +182,11 @@ static void cb_node(void *ctx, const wa_node *node)
             if (live_msg.direct_path) { NSString *dp = [NSString stringWithUTF8String:live_msg.direct_path]; if (dp.length) md[@"dpath"] = dp; }
             if (live_msg.media_key && live_msg.media_key_len) md[@"mkey"] = [NSData dataWithBytes:live_msg.media_key length:live_msg.media_key_len];
             if (live_msg.enc_sha && live_msg.enc_sha_len) md[@"esha"] = [NSData dataWithBytes:live_msg.enc_sha length:live_msg.enc_sha_len];
+            const char *notify = wa_node_attr(node, "notify");
+            if (notify) {
+                NSString *pn = [NSString stringWithUTF8String:notify];
+                if (pn.length) md[@"pushName"] = pn;
+            }
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessage object:self userInfo:md];
