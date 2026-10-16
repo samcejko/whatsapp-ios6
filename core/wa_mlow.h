@@ -48,9 +48,15 @@ void wa_mlow_decode_lsf(wa_rc *dec, int config, int intf, int active, wa_mlow_ls
 typedef struct { int32_t subfr[4]; int32_t pulses[320]; } wa_mlow_pulse_result;
 void wa_mlow_decode_pulses(wa_rc *dec, int p2, int p3, int p4, int p6, int s1, wa_mlow_pulse_result *out);
 
+// Per-subframe quantized log-gains + energy-residual symbols (unvoiced internal frames, LSF selector 0).
+typedef struct { int32_t gain_q[4]; int32_t nrg_res[4]; int32_t gain_main, gain_delta; } wa_mlow_gain_result;
+// p3 = subframe geometry (2 or 4); subfr[] = per-subframe pulse counts from the pulse stage.
+void wa_mlow_decode_gains(wa_rc *dec, int p3, const int32_t subfr[4], wa_mlow_gain_result *out);
+
 int wa_mlow_toc_selftest(void);
 int wa_mlow_lsf_selftest(void);
 int wa_mlow_pulse_selftest(void);
+int wa_mlow_gains_selftest(void);
 
 #ifdef __cplusplus
 }

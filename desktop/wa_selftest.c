@@ -106,6 +106,7 @@ int main(void)
     check("MLow LSF index decode (stage1/grid/stage2/extra vs vectors)", wa_mlow_lsf_selftest() == 0);
     check("MLow pulse CMF tables (split/runlen build)", wa_mlow_cc_selftest() == 0);
     check("MLow pulse decode (count/split/runs/signs vs vectors)", wa_mlow_pulse_selftest() == 0);
+    check("MLow gains decode (nrgres/gains seed tables + recon vs vectors)", wa_mlow_gains_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
