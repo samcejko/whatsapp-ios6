@@ -67,17 +67,25 @@ NSString *WADayLabel(uint64_t ts)
 }
 
 static NSDictionary *s_abCache = nil;
+static NSObject *getABLock(void) {
+    static NSObject *l;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        l = [[NSObject alloc] init];
+    });
+    return l;
+}
 
 void WAReloadAddressBookCache(void)
 {
-    @synchronized([WACommon class]) {
+    @synchronized(getABLock()) {
         s_abCache = nil;
     }
 }
 
 static void ensureAddressBookCache(void)
 {
-    @synchronized([WACommon class]) {
+    @synchronized(getABLock()) {
         if (s_abCache) return;
         NSMutableDictionary *dict = [NSMutableDictionary dictionary];
         CFErrorRef err = NULL;
