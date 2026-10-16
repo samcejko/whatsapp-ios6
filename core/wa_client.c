@@ -30,8 +30,8 @@ struct wa_client {
     int stop;
     int reconnect_wanted;     // set after pair-success (expected 515)
 
-    // pairing QR refs
-    char refs[8][96];
+    // pairing QR refs (WA refs can exceed 100 bytes; keep them whole)
+    char refs[8][512];
     int nref, cur_ref;
     uint64_t next_qr_us;
 
@@ -254,15 +254,18 @@ static void handle_pair_device(wa_client *c, const wa_node *iq, const wa_node *p
 {
     send_ack(c, iq);
     c->nref = 0;
+    int ref0_len = -1;
     for (int i = 0; i < pd->nchildren && c->nref < 8; i++) {
         wa_node *ref = pd->children[i];
         if (wa_node_tag_is(ref, "ref") && ref->has_content) {
+            if (ref0_len < 0) ref0_len = (int)ref->content_len;
             size_t n = ref->content_len < sizeof c->refs[0] ? ref->content_len : sizeof c->refs[0] - 1;
             memcpy(c->refs[c->nref], ref->content, n);
             c->refs[c->nref][n] = 0;
             c->nref++;
         }
     }
+    wa_log("pair-device: ref0 raw len=%d (buf=%d)", ref0_len, (int)sizeof c->refs[0]);
     c->cur_ref = 0;
     c->state = WA_PAIRING;
     c->next_qr_us = wa_now_us() + QR_ROTATE_MS * 1000ull;
@@ -361,7 +364,11 @@ static int take_pending_iq(wa_client *c, const wa_node *node)
 
 static void dispatch(wa_client *c, const wa_node *node)
 {
-    wa_log("<- <%s> type=%s", node->tag, wa_node_get_or(node, "type", "-"));
+    {
+        char *dbg = wa_node_to_string(node, 0);
+        wa_log("<- %s", dbg ? dbg : node->tag);
+        free(dbg);
+    }
     if (wa_node_tag_is(node, "iq")) {
         wa_node *pd = wa_node_child(node, "pair-device");
         wa_node *ps = wa_node_child(node, "pair-success");
