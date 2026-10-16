@@ -180,6 +180,17 @@ static void cb_device_changed(void *ctx, wa_device *d)
     return s;
 }
 
+- (instancetype)init
+{
+    if ((self = [super init])) {
+        // Load the saved device up front so -registered is accurate at launch (WAAppDelegate decides Chats vs Pairing
+        // before -start runs). Load-only: -start's loadOrCreateDevice reloads it or creates a new one if there is none.
+        if (wa_device_load(&_dev, [storePath() UTF8String]) == 0 && _dev.registered)
+            self.ownJID = [NSString stringWithUTF8String:_dev.pn];
+    }
+    return self;
+}
+
 - (BOOL)registered { return _dev.registered != 0; }
 
 - (void)loadOrCreateDevice
