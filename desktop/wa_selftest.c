@@ -107,6 +107,7 @@ int main(void)
     check("MLow pulse CMF tables (split/runlen build)", wa_mlow_cc_selftest() == 0);
     check("MLow pulse decode (count/split/runs/signs vs vectors)", wa_mlow_pulse_selftest() == 0);
     check("MLow gains decode (nrgres/gains seed tables + recon vs vectors)", wa_mlow_gains_selftest() == 0);
+    check("MLow pitch decode (LTP gains + lag/contour heap chase vs vectors)", wa_mlow_pitch_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }

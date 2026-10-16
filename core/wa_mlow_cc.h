@@ -36,6 +36,15 @@ int32_t wa_cc_gain_recon(int p4, int32_t idx);
 // fcbgOffset CDF window (92 entries) for (table_ix=cfg_sel, bucket, min_offset). NULL if out of range.
 const uint16_t *wa_cc_fcbg_offset(int table_ix, int bucket, int min_offset);
 
+// --- LTP gain tables (Group C), for the pitch decode (expanded by wa_cc_seed_init from seed fields 4-7) ---
+// acbgain CDF row for the previous gain index (17-entry CDF).
+const uint16_t *wa_cc_acbgain_row(int prev, size_t *len);
+// acbgain reconstruction weights (w0, w2) in Q14 for gain index gi.
+void wa_cc_acbgain_weights(int gi, int32_t *w0, int32_t *w2);
+// fcbgain filter CDFs: the initial V distribution (35 entries) and the V-delta window keyed on prev filter.
+const uint16_t *wa_cc_fcbgain_v(size_t *len);
+const uint16_t *wa_cc_fcbgain_v_delta(int prev_filt, size_t *len);
+
 int wa_mlow_cc_selftest(void);
 
 #ifdef __cplusplus

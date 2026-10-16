@@ -53,10 +53,31 @@ typedef struct { int32_t gain_q[4]; int32_t nrg_res[4]; int32_t gain_main, gain_
 // p3 = subframe geometry (2 or 4); subfr[] = per-subframe pulse counts from the pulse stage.
 void wa_mlow_decode_gains(wa_rc *dec, int p3, const int32_t subfr[4], wa_mlow_gain_result *out);
 
+// Pitch / LTP parameters for one internal frame (voiced). lag/contour select the pitch contour; gain_idx/filt_idx
+// are the per-subframe LTP gain/filter indices; int_lag_q6 is the per-subframe pitch lag in Q6 (1/64 sample).
+typedef struct {
+    int32_t gain_idx[4];
+    int32_t filt_idx[4];
+    int32_t lag, contour;
+    int32_t int_lag_q6[4];
+    int32_t sample_lag_q6[8];
+    int32_t num_seg;
+    int32_t block_lags[8];
+    int32_t num_subfr;
+} wa_mlow_pitch_result;
+
+// Build the pitch lag/contour heap window + LTP tables (idempotent). Returns 0 or -1.
+int wa_mlow_pitch_init(void);
+// Decode LTP gains/filters + pitch lag/contour. p3 = num subframes, p6 = config (0 = active WB/HR),
+// subfr[] = per-subframe pulse counts. st carries the cross-subframe predictor (prev gain/filt/lag).
+void wa_mlow_decode_pitch(wa_rc *dec, wa_mlow_lsf_state *st, int p3, int p6, const int32_t subfr[4],
+                          wa_mlow_pitch_result *res);
+
 int wa_mlow_toc_selftest(void);
 int wa_mlow_lsf_selftest(void);
 int wa_mlow_pulse_selftest(void);
 int wa_mlow_gains_selftest(void);
+int wa_mlow_pitch_selftest(void);
 
 #ifdef __cplusplus
 }

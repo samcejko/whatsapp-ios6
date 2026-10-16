@@ -47,6 +47,17 @@ static int g_gain_recon_n;
 static uint32_t g_gain_recon_base;
 static int g_gains_ready;
 
+// LTP gains (Group C), used by the pitch decode. acbgains HR = 17 rows x 17-entry CDF (seed field 4, 17x16 DCMF);
+// fcbgains V = 35-entry CDF (field 5); fcbgains V-delta = 68-entry CDF (field 6); acbgain weights = 32 int16 (field 7).
+#define CC_ACBG_N 16                 // DCMF bytes per acbgain row
+#define CC_ACBG_ROWS 17              // (prev+1) in 0..16
+#define CC_FCBG_V_N 34               // ccFcbgVN
+static uint16_t g_acbgains_hr[CC_ACBG_ROWS * (CC_ACBG_N + 1)];
+static uint16_t g_fcbgains_v[CC_FCBG_V_N + 1];
+static uint16_t g_fcbgains_v_delta[67 + 1];
+static int16_t g_acbgains_cb_hr_q14[32];
+static int g_acbgains_cb_n;
+
 // INTEGER, bit-exact dcmf->cmf (truncating-int normalize). out holds n+1 entries. uint16 wrap is intentional.
 static void celp_dcmf_to_cmf(const uint8_t *dcmf, int n, uint16_t *cmf)
 {
@@ -131,6 +142,26 @@ int wa_cc_seed_init(void)
     for (int k = 0; k < g_gain_recon_n; k++)
         g_gain_recon[k] = (int16_t)((uint16_t)f[9].bytes[2 * k] | ((uint16_t)f[9].bytes[2 * k + 1] << 8));
 
+    // LTP gains (Group C): fields 4 (acbgains HR), 5 (fcbgains V), 6 (fcbgains V-delta), 7 (weights, zigzag sint32).
+    if (!f[4].present || !f[5].present || !f[6].present || !f[7].present) return -1;
+    if (f[4].len != (size_t)CC_ACBG_ROWS * CC_ACBG_N) return -1;
+    for (int r = 0; r < CC_ACBG_ROWS; r++)
+        celp_dcmf_to_cmf(f[4].bytes + r * CC_ACBG_N, CC_ACBG_N, &g_acbgains_hr[r * (CC_ACBG_N + 1)]);
+    if (f[5].len != (size_t)CC_FCBG_V_N) return -1;
+    celp_dcmf_to_cmf(f[5].bytes, (int)f[5].len, g_fcbgains_v);
+    if (f[6].len > 67) return -1;
+    celp_dcmf_to_cmf(f[6].bytes, (int)f[6].len, g_fcbgains_v_delta);
+    {
+        size_t bi = 0; int c = 0;
+        while (bi < f[7].len && c < 32) {
+            uint64_t v = 0; int s = 0;
+            while (bi < f[7].len) { uint8_t ch = f[7].bytes[bi++]; v |= (uint64_t)(ch & 0x7f) << s; if (!(ch & 0x80)) break; s += 7; }
+            int64_t z = (int64_t)(v >> 1) ^ -(int64_t)(v & 1);
+            g_acbgains_cb_hr_q14[c++] = (int16_t)z;
+        }
+        g_acbgains_cb_n = c;
+    }
+
     g_gains_ready = 1;
     return 0;
 }
@@ -169,6 +200,33 @@ const uint16_t *wa_cc_fcbg_offset(int table_ix, int bucket, int min_offset)
     if (idx < 0 || idx >= CC_FCBG_OFFSET_CHUNKS) return NULL;
     if (min_offset < 0 || min_offset + CC_FCBG_WINDOW > CC_FCBG_OFFSET_STEPS + 1) return NULL;
     return &g_fcbg_offset[idx][min_offset];
+}
+
+// --- LTP gain accessors (Group C), for the pitch decode ---
+const uint16_t *wa_cc_acbgain_row(int prev, size_t *len)
+{
+    int base = (prev + 1) * (CC_ACBG_N + 1);
+    if (prev + 1 < 0 || prev + 1 >= CC_ACBG_ROWS) { *len = 0; return NULL; }
+    *len = CC_ACBG_N + 1;
+    return &g_acbgains_hr[base];
+}
+
+void wa_cc_acbgain_weights(int gi, int32_t *w0, int32_t *w2)
+{
+    int i = gi * 2;
+    if (i < 0 || i + 1 >= g_acbgains_cb_n) { *w0 = 0; *w2 = 0; return; }
+    *w0 = (int32_t)g_acbgains_cb_hr_q14[i];
+    *w2 = (int32_t)g_acbgains_cb_hr_q14[i + 1];
+}
+
+const uint16_t *wa_cc_fcbgain_v(size_t *len) { *len = CC_FCBG_V_N + 1; return g_fcbgains_v; }
+
+const uint16_t *wa_cc_fcbgain_v_delta(int prev_filt, size_t *len)
+{
+    int start = CC_FCBG_V_N - 1 - prev_filt;   // 33 - prev_filt
+    if (start < 0 || start + 35 > (int)(sizeof(g_fcbgains_v_delta) / sizeof(g_fcbgains_v_delta[0]))) { *len = 0; return NULL; }
+    *len = 35;
+    return &g_fcbgains_v_delta[start];
 }
 
 // Decode gains+nrgres. subfr[] are the per-subframe pulse counts from the pulse stage; p3 is the subframe
