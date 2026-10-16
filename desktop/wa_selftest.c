@@ -20,6 +20,7 @@
 #include "wa_mlow_rc.h"
 #include "wa_mlow.h"
 #include "wa_mlow_cc.h"
+#include "wa_mlow_noise.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -108,6 +109,7 @@ int main(void)
     check("MLow pulse decode (count/split/runs/signs vs vectors)", wa_mlow_pulse_selftest() == 0);
     check("MLow gains decode (nrgres/gains seed tables + recon vs vectors)", wa_mlow_gains_selftest() == 0);
     check("MLow pitch decode (LTP gains + lag/contour heap chase vs vectors)", wa_mlow_pitch_selftest() == 0);
+    check("MLow gennoise (float CELP noise gen vs vectors, eps 1e-6)", wa_mlow_noise_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
