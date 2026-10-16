@@ -190,10 +190,16 @@ static void cb_node(void *ctx, const wa_node *node)
             }
 
             dispatch_async(dispatch_get_main_queue(), ^{
-                AudioServicesPlaySystemSound(1003);
+                NSString *fromJid = md[@"from"];
+                if (fromJid.length && ![[WAChatStore shared] isChatMuted:fromJid]) {
+                    SystemSoundID snd = (SystemSoundID)[[NSUserDefaults standardUserDefaults] integerForKey:@"wa_sound_id"];
+                    if (snd == 0) snd = 1003;
+                    AudioServicesPlaySystemSound(snd);
+                }
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessage object:self userInfo:md];
             });
             wa_history_msg_free(&live_msg);
+
         }
         return;
     }
@@ -322,13 +328,20 @@ static void cb_node(void *ctx, const wa_node *node)
         if (from && from[0]) {
             NSString *f = [NSString stringWithUTF8String:from];
             NSString *state = @"paused";
-            if (wa_node_child(node, "composing")) state = @"composing";
+            wa_node *comp = wa_node_child(node, "composing");
+            if (comp) {
+                const char *media = wa_node_get(comp, "media");
+                if (media && strcmp(media, "audio") == 0) state = @"recording";
+                else state = @"composing";
+            }
+            else if (wa_node_child(node, "recording")) state = @"recording";
             else if (wa_node_child(node, "paused")) state = @"paused";
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionPresenceChanged object:self userInfo:@{ @"jid": f, @"state": state }];
             });
         }
     }
+
     if (wa_node_tag_is(node, "iq")) {
         const char *from = wa_node_get(node, "from");
         const char *type = wa_node_get(node, "type");
@@ -759,6 +772,58 @@ static void action_send_chatstate(wa_client *c, void *ctx)
     snprintf(p->state, sizeof p->state, "%s", composing ? "composing" : "paused");
     if (wa_client_post(_client, action_send_chatstate, p) != 0) free(p);
 }
+
+static void action_send_recording_state(wa_client *c, void *ctx)
+{
+    wa_presence_ctx *p = (wa_presence_ctx *)ctx;
+    wa_node *n = wa_node_new("chatstate");
+    wa_node_attr(n, "to", p->jid);
+    if (strcmp(p->state, "recording") == 0) {
+        wa_node *comp = wa_node_add_new(n, "composing");
+        wa_node_attr(comp, "media", "audio");
+    } else {
+        wa_node_add_new(n, "paused");
+    }
+    wa_client_send(c, n);
+    wa_node_free(n);
+    free(p);
+}
+
+- (void)sendRecordingState:(BOOL)recording toJID:(NSString *)jid
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    snprintf(p->state, sizeof p->state, "%s", recording ? "recording" : "paused");
+    if (wa_client_post(_client, action_send_recording_state, p) != 0) free(p);
+}
+
+static void action_set_block(wa_client *c, void *ctx)
+{
+    wa_presence_ctx *p = (wa_presence_ctx *)ctx;
+    wa_node *iq = wa_node_new("iq");
+    char idbuf[32];
+    snprintf(idbuf, sizeof idbuf, "blk_%08x", (unsigned int)arc4random());
+    wa_node_attr(iq, "id", idbuf);
+    wa_node_attr(iq, "to", "s.whatsapp.net");
+    wa_node_attr(iq, "type", "set");
+    wa_node *item = wa_node_add_new(iq, "item");
+    wa_node_attr(item, "jid", p->jid);
+    wa_node_attr(item, "action", p->state);
+    wa_client_send(c, iq);
+    wa_node_free(iq);
+    free(p);
+}
+
+- (void)setBlockContact:(NSString *)jid blocked:(BOOL)blocked
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    snprintf(p->state, sizeof p->state, "%s", blocked ? "block" : "unblock");
+    if (wa_client_post(_client, action_set_block, p) != 0) free(p);
+}
+
 
 static void action_fetch_picture(wa_client *c, void *ctx)
 {

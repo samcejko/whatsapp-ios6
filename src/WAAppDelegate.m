@@ -221,8 +221,78 @@
         }
         return YES;
     }
+    if ([cmd isEqualToString:@"calls"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+        [nav popToRootViewControllerAnimated:NO];
+        if ([nav.topViewController isKindOfClass:[WAChatsViewController class]]) {
+            WAChatsViewController *cvc = (WAChatsViewController *)nav.topViewController;
+            cvc.navSegment.selectedSegmentIndex = 1;
+            [cvc onSegmentChanged];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"pin"]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"]) jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (jid.length) {
+            BOOL p = [[WAChatStore shared] isChatPinned:jid];
+            [[WAChatStore shared] setChat:jid pinned:!p];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"mute"]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"]) jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (jid.length) {
+            BOOL m = [[WAChatStore shared] isChatMuted:jid];
+            [[WAChatStore shared] muteChat:jid duration:m ? 0 : 2000000000];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"react"]) {
+        NSString *jid = nil, *emoji = @"👍", *mid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2) {
+                NSString *k = p[0], *v = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+                if ([k isEqualToString:@"jid"]) jid = v;
+                else if ([k isEqualToString:@"emoji"]) emoji = v;
+                else if ([k isEqualToString:@"mid"]) mid = v;
+            }
+        }
+        if (jid.length) {
+            if (!mid.length) {
+                NSArray *msgs = [[WAChatStore shared] messagesForJID:jid];
+                mid = [msgs.lastObject objectForKey:@"id"];
+            }
+            if (mid.length) [[WAChatStore shared] addReaction:emoji toMessageId:mid inChat:jid];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"search"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        NSString *q = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"q"]) q = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+        if ([nav.topViewController respondsToSelector:@selector(toggleSearch)]) {
+            [(WAChatViewController *)nav.topViewController toggleSearch];
+            if (q.length) {
+                [(WAChatViewController *)nav.topViewController searchBar:nil textDidChange:q];
+            }
+        }
+        return YES;
+    }
     return NO;
 }
+
 
 - (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url { return [self handleDebugURL:url]; }
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url sourceApplication:(NSString *)src annotation:(id)ann { return [self handleDebugURL:url]; }

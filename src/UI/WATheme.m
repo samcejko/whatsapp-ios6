@@ -20,19 +20,59 @@
     }
 }
 
-+ (UIImage *)wallpaper
++ (WAWallpaperType)currentWallpaperType
 {
-    CGSize sz = CGSizeMake(8, 8);
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:@"wa_wallpaper_type"];
+    return n ? [n integerValue] : WAWallpaperTypeClassic;
+}
+
++ (void)setWallpaperType:(WAWallpaperType)type
+{
+    [[NSUserDefaults standardUserDefaults] setInteger:type forKey:@"wa_wallpaper_type"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"WAWallpaperChangedNotification" object:nil];
+}
+
++ (UIImage *)wallpaperForType:(WAWallpaperType)type
+{
+    CGSize sz = CGSizeMake(16, 16);
     UIGraphicsBeginImageContextWithOptions(sz, YES, 0);
     CGContextRef c = UIGraphicsGetCurrentContext();
-    CGContextSetRGBFillColor(c, 0.91, 0.90, 0.84, 1.0);   // warm beige
-    CGContextFillRect(c, CGRectMake(0, 0, sz.width, sz.height));
-    CGContextSetRGBFillColor(c, 0.88, 0.87, 0.81, 1.0);
-    CGContextFillRect(c, CGRectMake(0, 0, 1, 1));
+    if (type == WAWallpaperTypeParchment) {
+        CGContextSetRGBFillColor(c, 0.95, 0.92, 0.82, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, sz.width, sz.height));
+        CGContextSetRGBFillColor(c, 0.92, 0.88, 0.77, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, 2, 2));
+        CGContextFillRect(c, CGRectMake(8, 8, 2, 2));
+    } else if (type == WAWallpaperTypeSlate) {
+        CGContextSetRGBFillColor(c, 0.18, 0.22, 0.25, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, sz.width, sz.height));
+        CGContextSetRGBFillColor(c, 0.22, 0.26, 0.30, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, 2, 2));
+        CGContextFillRect(c, CGRectMake(8, 8, 2, 2));
+    } else if (type == WAWallpaperTypeSky) {
+        CGContextSetRGBFillColor(c, 0.85, 0.92, 0.98, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, sz.width, sz.height));
+        CGContextSetRGBFillColor(c, 0.78, 0.87, 0.95, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, 2, 2));
+        CGContextFillRect(c, CGRectMake(8, 8, 2, 2));
+    } else { // Classic
+        CGContextSetRGBFillColor(c, 0.91, 0.90, 0.84, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, sz.width, sz.height));
+        CGContextSetRGBFillColor(c, 0.88, 0.87, 0.81, 1.0);
+        CGContextFillRect(c, CGRectMake(0, 0, 2, 2));
+        CGContextFillRect(c, CGRectMake(8, 8, 2, 2));
+    }
     UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return [img resizableImageWithCapInsets:UIEdgeInsetsZero];
 }
+
++ (UIImage *)wallpaper
+{
+    return [self wallpaperForType:[self currentWallpaperType]];
+}
+
 
 + (UIImage *)bubbleOutgoing:(BOOL)outgoing
 {

@@ -51,8 +51,14 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 - (void)unsubscribePresence:(NSString *)jid;
 // Send typing indicator (composing = YES) or idle (composing = NO)
 - (void)sendChatState:(BOOL)composing toJID:(NSString *)jid;
+// Send audio recording indicator
+- (void)sendRecordingState:(BOOL)recording toJID:(NSString *)jid;
+
+// Block / unblock contact
+- (void)setBlockContact:(NSString *)jid blocked:(BOOL)blocked;
 
 // Request contact's profile picture preview
 - (void)fetchProfilePicture:(NSString *)jid;
+
 
 @end

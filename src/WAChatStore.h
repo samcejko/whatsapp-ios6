@@ -30,6 +30,7 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Record a message the user just sent (persist + notify).
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid;
 - (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
+- (void)recordOutgoing:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status quoted:(NSDictionary *)quoted;
 - (void)recordOutgoingMedia:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status;
 
 // Update status of a message by id (e.g. pending -> sent -> delivered -> read)
@@ -58,6 +59,31 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 - (BOOL)isMessageStarred:(NSDictionary *)msg inChat:(NSString *)jid;
 - (NSArray *)starredMessagesForJID:(NSString *)jid;
 
+// Pinned chats
+- (BOOL)isChatPinned:(NSString *)jid;
+- (void)setChat:(NSString *)jid pinned:(BOOL)pinned;
+
+// Muted chats
+- (BOOL)isChatMuted:(NSString *)jid;
+- (void)muteChat:(NSString *)jid duration:(NSTimeInterval)duration;
+- (NSTimeInterval)muteExpiryForJID:(NSString *)jid;
+
+// Reactions
+- (void)addReaction:(NSString *)emoji toMessageId:(NSString *)mid inChat:(NSString *)jid;
+
+// Ephemeral / Disappearing messages
+- (NSTimeInterval)ephemeralDurationForChat:(NSString *)jid;
+- (void)setEphemeralDuration:(NSTimeInterval)duration forChat:(NSString *)jid;
+
+// Blocked contacts
+- (BOOL)isContactBlocked:(NSString *)jid;
+- (void)setContact:(NSString *)jid blocked:(BOOL)blocked;
+
+// Call Logs
+- (void)recordCallLog:(NSDictionary *)log;
+- (NSArray *)callLogs;
+- (void)clearCallLogs;
+
 // Re-resolves contact names against AddressBook and push names, persists if changed.
 - (void)refreshContactNames;
 
@@ -68,3 +94,4 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 + (NSString *)mediaLabelForKind:(int)kind;
 
 @end
+

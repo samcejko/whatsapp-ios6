@@ -4,8 +4,9 @@
 #import "../WASession.h"
 #import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
+#import <AudioToolbox/AudioToolbox.h>
 
-@interface WASettingsViewController ()
+@interface WASettingsViewController () <UIActionSheetDelegate>
 @property (nonatomic, strong) UILabel *statusSub;
 @end
 
@@ -73,7 +74,7 @@
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s
 {
-    if (s == 0) return 2; // Refresh contacts, Clear all chats
+    if (s == 0) return 4; // Refresh contacts, Wallpaper, Notification sound, Clear all chats
     if (s == 1) return 2; // Encryption, Audio Codec
     if (s == 2) return 1; // Unlink
     return 0;
@@ -102,7 +103,7 @@
     NSString *cid = [NSString stringWithFormat:@"cell_%ld_%ld", (long)ip.section, (long)ip.row];
     UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
-        UITableViewCellStyle st = (ip.section == 1) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
+        UITableViewCellStyle st = (ip.section == 1 || (ip.section == 0 && (ip.row == 1 || ip.row == 2))) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
         cell = [[UITableViewCell alloc] initWithStyle:st reuseIdentifier:cid];
     }
     if (ip.section == 0) {
@@ -110,6 +111,27 @@
             cell.textLabel.text = WALoc(@"refresh_contacts");
             cell.textLabel.textColor = [WATheme accent];
             cell.textLabel.textAlignment = NSTextAlignmentLeft;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (ip.row == 1) {
+            cell.textLabel.text = WALoc(@"wallpaper");
+            WAWallpaperType wt = [WATheme currentWallpaperType];
+            NSString *wname = WALoc(@"wallpaper_classic");
+            if (wt == WAWallpaperTypeParchment) wname = WALoc(@"wallpaper_parchment");
+            else if (wt == WAWallpaperTypeSlate) wname = WALoc(@"wallpaper_slate");
+            else if (wt == WAWallpaperTypeSky) wname = WALoc(@"wallpaper_sky");
+            cell.detailTextLabel.text = wname;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (ip.row == 2) {
+            cell.textLabel.text = WALoc(@"notification_sound");
+            NSInteger sid = [[NSUserDefaults standardUserDefaults] integerForKey:@"wa_sound_id"];
+            NSString *sname = WALoc(@"sound_default");
+            if (sid == 1004) sname = WALoc(@"sound_note");
+            else if (sid == 1016) sname = WALoc(@"sound_pop");
+            else if (sid == 1000) sname = WALoc(@"sound_bell");
+            else if (sid == 1005) sname = WALoc(@"sound_electronic");
+            else if (sid == 1024) sname = WALoc(@"sound_fanfare");
+            else if (sid == 1021) sname = WALoc(@"sound_chime");
+            cell.detailTextLabel.text = sname;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
             cell.textLabel.text = WALoc(@"clear_all_chats");
@@ -144,6 +166,32 @@
             [[WAChatStore shared] refreshContactNames];
             UIAlertView *a = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"contacts_refreshed") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
             [a show];
+        } else if (ip.row == 1) { // Wallpaper
+            UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"wallpaper")
+                                                            delegate:self
+                                                   cancelButtonTitle:WALoc(@"cancel")
+                                              destructiveButtonTitle:nil
+                                                   otherButtonTitles:WALoc(@"wallpaper_classic"), WALoc(@"wallpaper_parchment"), WALoc(@"wallpaper_slate"), WALoc(@"wallpaper_sky"), nil];
+            as.tag = 503;
+            if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                UITableViewCell *cell = [t cellForRowAtIndexPath:ip];
+                [as showFromRect:cell.bounds inView:cell animated:YES];
+            } else {
+                [as showInView:self.view];
+            }
+        } else if (ip.row == 2) { // Notification Sound
+            UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"notification_sound")
+                                                            delegate:self
+                                                   cancelButtonTitle:WALoc(@"cancel")
+                                              destructiveButtonTitle:nil
+                                                   otherButtonTitles:WALoc(@"sound_default"), WALoc(@"sound_note"), WALoc(@"sound_pop"), WALoc(@"sound_bell"), WALoc(@"sound_electronic"), WALoc(@"sound_fanfare"), WALoc(@"sound_chime"), nil];
+            as.tag = 504;
+            if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                UITableViewCell *cell = [t cellForRowAtIndexPath:ip];
+                [as showFromRect:cell.bounds inView:cell animated:YES];
+            } else {
+                [as showInView:self.view];
+            }
         } else {
             UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"clear_all_chats_confirm")
                                                             delegate:self
@@ -170,6 +218,20 @@
 {
     if (actionSheet.tag == 501 && buttonIndex == actionSheet.destructiveButtonIndex) {
         [[WAChatStore shared] clearAllChats];
+    } else if (actionSheet.tag == 503) { // Wallpaper
+        if (buttonIndex >= 0 && buttonIndex <= 3) {
+            [WATheme setWallpaperType:(WAWallpaperType)buttonIndex];
+            [_table reloadData];
+        }
+    } else if (actionSheet.tag == 504) { // Sound
+        NSArray *sounds = @[ @1003, @1004, @1016, @1000, @1005, @1024, @1021 ];
+        if (buttonIndex < sounds.count) {
+            NSInteger sid = [sounds[buttonIndex] integerValue];
+            [[NSUserDefaults standardUserDefaults] setInteger:sid forKey:@"wa_sound_id"];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            AudioServicesPlaySystemSound((SystemSoundID)sid);
+            [_table reloadData];
+        }
     }
 }
 

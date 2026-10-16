@@ -1,6 +1,9 @@
 #import "WACommon.h"
+#import <UIKit/UIKit.h>
+#import <CoreText/CoreText.h>
 #import <AddressBook/AddressBook.h>
 #include "wa_util.h"
+
 
 void WALog(NSString *fmt, ...)
 {
@@ -249,6 +252,150 @@ NSString *WADisplayNameForChat(NSString *jid, NSString *savedName)
     // 4. Format as phone number (or WhatsApp kontakt for LID)
     return WAFormatPhoneNumber(jid);
 }
+
+NSAttributedString *WAParseMarkdownText(NSString *raw, UIFont *baseFont, UIColor *textColor)
+{
+    if (!raw.length) return [[NSAttributedString alloc] initWithString:@""];
+    if (!baseFont) baseFont = [UIFont systemFontOfSize:16];
+    if (!textColor) textColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+
+    // Fast path: if no markdown characters present, return plain attributed string
+    if ([raw rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"*_~`"]].location == NSNotFound) {
+        return [[NSAttributedString alloc] initWithString:raw attributes:@{
+            NSFontAttributeName: baseFont,
+            NSForegroundColorAttributeName: textColor
+        }];
+    }
+
+    NSMutableAttributedString *res = [[NSMutableAttributedString alloc] init];
+    NSUInteger len = raw.length;
+    NSUInteger i = 0;
+
+    UIFont *boldFont = [UIFont boldSystemFontOfSize:baseFont.pointSize];
+    UIFont *italicFont = [UIFont italicSystemFontOfSize:baseFont.pointSize];
+    UIFont *monoFont = [UIFont fontWithName:@"Courier" size:baseFont.pointSize] ?: baseFont;
+
+    while (i < len) {
+        unichar c = [raw characterAtIndex:i];
+
+        // Check for ``` code block
+        if (c == '`' && i + 2 < len && [raw characterAtIndex:i+1] == '`' && [raw characterAtIndex:i+2] == '`') {
+            NSRange searchRange = NSMakeRange(i + 3, len - (i + 3));
+            NSRange endRange = [raw rangeOfString:@"```" options:0 range:searchRange];
+            if (endRange.location != NSNotFound) {
+                NSString *snippet = [raw substringWithRange:NSMakeRange(i + 3, endRange.location - (i + 3))];
+                NSAttributedString *as = [[NSAttributedString alloc] initWithString:snippet attributes:@{
+                    NSFontAttributeName: monoFont,
+                    NSForegroundColorAttributeName: textColor
+                }];
+                [res appendAttributedString:as];
+                i = endRange.location + 3;
+                continue;
+            }
+        }
+        // Check for ` single backtick code
+        if (c == '`') {
+            NSRange searchRange = NSMakeRange(i + 1, len - (i + 1));
+            NSRange endRange = [raw rangeOfString:@"`" options:0 range:searchRange];
+            if (endRange.location != NSNotFound && endRange.location > i + 1) {
+                NSString *snippet = [raw substringWithRange:NSMakeRange(i + 1, endRange.location - (i + 1))];
+                NSAttributedString *as = [[NSAttributedString alloc] initWithString:snippet attributes:@{
+                    NSFontAttributeName: monoFont,
+                    NSForegroundColorAttributeName: textColor
+                }];
+                [res appendAttributedString:as];
+                i = endRange.location + 1;
+                continue;
+            }
+        }
+        // Check for * bold
+        if (c == '*') {
+            NSRange searchRange = NSMakeRange(i + 1, len - (i + 1));
+            NSRange endRange = [raw rangeOfString:@"*" options:0 range:searchRange];
+            if (endRange.location != NSNotFound && endRange.location > i + 1) {
+                NSString *snippet = [raw substringWithRange:NSMakeRange(i + 1, endRange.location - (i + 1))];
+                NSAttributedString *as = [[NSAttributedString alloc] initWithString:snippet attributes:@{
+                    NSFontAttributeName: boldFont,
+                    NSForegroundColorAttributeName: textColor
+                }];
+                [res appendAttributedString:as];
+                i = endRange.location + 1;
+                continue;
+            }
+        }
+        // Check for _ italic
+        if (c == '_') {
+            NSRange searchRange = NSMakeRange(i + 1, len - (i + 1));
+            NSRange endRange = [raw rangeOfString:@"_" options:0 range:searchRange];
+            if (endRange.location != NSNotFound && endRange.location > i + 1) {
+                NSString *snippet = [raw substringWithRange:NSMakeRange(i + 1, endRange.location - (i + 1))];
+                NSAttributedString *as = [[NSAttributedString alloc] initWithString:snippet attributes:@{
+                    NSFontAttributeName: italicFont,
+                    NSForegroundColorAttributeName: textColor
+                }];
+                [res appendAttributedString:as];
+                i = endRange.location + 1;
+                continue;
+            }
+        }
+        // Check for ~ strikethrough
+        if (c == '~') {
+            NSRange searchRange = NSMakeRange(i + 1, len - (i + 1));
+            NSRange endRange = [raw rangeOfString:@"~" options:0 range:searchRange];
+            if (endRange.location != NSNotFound && endRange.location > i + 1) {
+                NSString *snippet = [raw substringWithRange:NSMakeRange(i + 1, endRange.location - (i + 1))];
+                NSDictionary *attrs = @{
+                    NSFontAttributeName: baseFont,
+                    NSForegroundColorAttributeName: textColor,
+                    NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)
+                };
+                NSAttributedString *as = [[NSAttributedString alloc] initWithString:snippet attributes:attrs];
+                [res appendAttributedString:as];
+                i = endRange.location + 1;
+                continue;
+            }
+        }
+
+        // Regular character: accumulate until next markdown token
+        NSUInteger nextSpecial = [raw rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"*_~`"]
+                                                      options:0
+                                                        range:NSMakeRange(i, len - i)].location;
+        if (nextSpecial == NSNotFound) {
+            NSString *rem = [raw substringFromIndex:i];
+            [res appendAttributedString:[[NSAttributedString alloc] initWithString:rem attributes:@{
+                NSFontAttributeName: baseFont,
+                NSForegroundColorAttributeName: textColor
+            }]];
+            break;
+        } else if (nextSpecial > i) {
+            NSString *plain = [raw substringWithRange:NSMakeRange(i, nextSpecial - i)];
+            [res appendAttributedString:[[NSAttributedString alloc] initWithString:plain attributes:@{
+                NSFontAttributeName: baseFont,
+                NSForegroundColorAttributeName: textColor
+            }]];
+            i = nextSpecial;
+        } else {
+            // Unmatched delimiter character: append as literal
+            NSString *single = [raw substringWithRange:NSMakeRange(i, 1)];
+            [res appendAttributedString:[[NSAttributedString alloc] initWithString:single attributes:@{
+                NSFontAttributeName: baseFont,
+                NSForegroundColorAttributeName: textColor
+            }]];
+            i++;
+        }
+    }
+    return res;
+}
+
+CGSize WAMeasureAttributedString(NSAttributedString *as, CGFloat maxWidth)
+{
+    if (!as || as.length == 0) return CGSizeZero;
+    CTFramesetterRef fs = CTFramesetterCreateWithAttributedString((__bridge CFAttributedStringRef)as);
+    CGSize fit = CTFramesetterSuggestFrameSizeWithConstraints(fs, CFRangeMake(0, (CFIndex)as.length), NULL, CGSizeMake(maxWidth, CGFLOAT_MAX), NULL);
+    CFRelease(fs);
+    return CGSizeMake(ceilf(fit.width), ceilf(fit.height));
+}
+
 
 // Route the C core's log sink into NSLog (never logs secrets).
 static void wa_log_to_nslog(const char *line)

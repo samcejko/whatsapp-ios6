@@ -25,6 +25,11 @@ NSString *WAFormatPhoneNumber(NSString *raw);
 NSString *WADisplayNameForChat(NSString *jid, NSString *savedName);
 // Invalidate address book in-memory cache so it re-reads
 void WAReloadAddressBookCache(void);
+// Parse WhatsApp markdown (*bold*, _italic_, ~strike~, `code`) into an NSAttributedString
+NSAttributedString *WAParseMarkdownText(NSString *raw, UIFont *baseFont, UIColor *textColor);
+// Measure the bounding size of an NSAttributedString constrained to maxWidth using CoreText
+CGSize WAMeasureAttributedString(NSAttributedString *as, CGFloat maxWidth);
 #ifdef __cplusplus
 }
 #endif
+
