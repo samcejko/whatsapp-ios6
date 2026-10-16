@@ -166,6 +166,24 @@
         }
         return YES;
     }
+    if ([cmd isEqualToString:@"send"]) {
+        NSString *jid = nil, *text = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2) {
+                NSString *k = p[0], *v = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+                if ([k isEqualToString:@"jid"]) jid = v;
+                else if ([k isEqualToString:@"text"]) text = v;
+            }
+        }
+        if (jid.length && text.length) {
+            NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+            [[WAChatStore shared] recordOutgoing:text toJID:jid msgId:mid status:WAMessageStatusPending];
+            [[WASession shared] sendText:text toJID:jid msgId:mid];
+            WALog(@"debug send to %@ [%@]: %@", jid, mid, text);
+        }
+        return YES;
+    }
     return NO;
 }
 
