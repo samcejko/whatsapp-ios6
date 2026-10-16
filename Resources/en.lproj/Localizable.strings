@@ -75,6 +75,7 @@
 "delete" = "Delete";
 "contact_info" = "Contact Info";
 "messages_count" = "messages";
+"media_shared" = "Shared Media";
 "media_count" = "media files";
 "chat_settings" = "Chat Settings";
 "refresh_contacts" = "Refresh Contacts from Address Book";
@@ -84,3 +85,7 @@
 "audio_codecs" = "Audio Codec";
 "about_app" = "About Wazzup";
 "version" = "Version";
+"star_message" = "Star Message";
+"unstar_message" = "Unstar Message";
+"starred_messages" = "Starred Messages";
+"no_starred" = "No Starred Messages";

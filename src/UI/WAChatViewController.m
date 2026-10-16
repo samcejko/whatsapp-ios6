@@ -8,6 +8,7 @@
 #import "../WAChatStore.h"
 #import "../WAAudioPlayer.h"
 #import <QuartzCore/QuartzCore.h>
+#import <AudioToolbox/AudioToolbox.h>
 #include "wa_history.h"   // WA_MSG_* kinds
 
 @interface WAChatViewController () <UIDocumentInteractionControllerDelegate, UIActionSheetDelegate>
@@ -242,8 +243,8 @@ static NSString *durationStr(unsigned int secs)
         if ([m[@"id"] length]) d[@"id"] = m[@"id"];
         d[@"display"] = [self displayTextFor:m];
         if (self.isGroup && ![m[@"out"] boolValue] && [m[@"sender"] length]) d[@"sender"] = m[@"sender"];
-        // carry media refs for the full-screen viewer and audio player
-        for (NSString *k in @[ @"thumb", @"dpath", @"mkey", @"esha", @"dur", @"file", @"audio_data" ]) if (m[k]) d[k] = m[k];
+        // carry media refs and starred status for the full-screen viewer, audio player, and UI
+        for (NSString *k in @[ @"thumb", @"dpath", @"mkey", @"esha", @"dur", @"file", @"audio_data", @"starred" ]) if (m[k]) d[k] = m[k];
         int kind = [m[@"kind"] intValue];
         NSData *thumb = m[@"thumb"];
         if ((kind == WA_MSG_IMAGE || kind == WA_MSG_VIDEO) && [thumb isKindOfClass:[NSData class]] && thumb.length) {
@@ -385,6 +386,7 @@ static NSString *durationStr(unsigned int secs)
     NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
     [[WAChatStore shared] recordOutgoing:text toJID:self.jid msgId:mid status:WAMessageStatusPending];
     [[WASession shared] sendText:text toJID:self.jid msgId:mid];
+    AudioServicesPlaySystemSound(1004);
     WALog(@"send to %@ [%@]: %lu chars", self.jid, mid, (unsigned long)text.length);
 }
 
@@ -512,7 +514,10 @@ static NSString *durationStr(unsigned int secs)
     }
     UIFont *statusFont = [UIFont systemFontOfSize:11];
     CGFloat statusW = statusGlyph.length ? [statusGlyph sizeWithFont:statusFont].width : 0;
-    CGFloat bottomRowW = timeW + statusW;
+    BOOL isStarred = [m[@"starred"] boolValue];
+    NSString *starGlyph = isStarred ? @"★ " : @"";
+    CGFloat starW = starGlyph.length ? [starGlyph sizeWithFont:timeFont].width : 0;
+    CGFloat bottomRowW = timeW + statusW + starW;
     CGFloat senderW = sender.length ? [sender sizeWithFont:[UIFont boldSystemFontOfSize:13]].width : 0;
 
     CGFloat contentW = MAX(MAX(MAX(thumb.width, ts.width), bottomRowW), senderW);
@@ -562,16 +567,27 @@ static NSString *durationStr(unsigned int secs)
         lbl.text = text;
         [cell.contentView addSubview:lbl];
     }
+    CGFloat curX = bf.origin.x + bw - 12 - bottomRowW;
+    if (isStarred) {
+        UILabel *starLbl = [[UILabel alloc] initWithFrame:CGRectMake(curX, bf.origin.y + bh - 16, starW + 1, 13)];
+        starLbl.font = timeFont;
+        starLbl.backgroundColor = [UIColor clearColor];
+        starLbl.textColor = [UIColor colorWithRed:0.95 green:0.75 blue:0.1 alpha:1.0];
+        starLbl.text = starGlyph;
+        [cell.contentView addSubview:starLbl];
+        curX += starW;
+    }
     if (timeStr.length) {
-        UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - bottomRowW, bf.origin.y + bh - 16, timeW + 1, 13)];
+        UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(curX, bf.origin.y + bh - 16, timeW + 1, 13)];
         tl.font = timeFont;
         tl.backgroundColor = [UIColor clearColor];
         tl.textColor = out ? [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0] : [UIColor colorWithWhite:0.55 alpha:1.0];
         tl.text = timeStr;
         [cell.contentView addSubview:tl];
+        curX += timeW;
     }
     if (statusGlyph.length) {
-        UILabel *stl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - statusW, bf.origin.y + bh - 16, statusW + 1, 13)];
+        UILabel *stl = [[UILabel alloc] initWithFrame:CGRectMake(curX, bf.origin.y + bh - 16, statusW + 1, 13)];
         stl.font = statusFont;
         stl.backgroundColor = [UIColor clearColor];
         stl.textColor = statusColor;
@@ -587,7 +603,7 @@ static NSString *durationStr(unsigned int secs)
     [self.navigationController pushViewController:info animated:YES];
 }
 
-// Long-press a bubble to copy or delete it.
+// Long-press a bubble to copy, star, or delete it.
 - (void)onLongPress:(UILongPressGestureRecognizer *)g
 {
     if (g.state != UIGestureRecognizerStateBegan) return;
@@ -600,11 +616,14 @@ static NSString *durationStr(unsigned int secs)
     NSString *preview = m[@"display"];
     if (preview.length > 30) preview = [[preview substringToIndex:30] stringByAppendingString:@"..."];
 
+    BOOL isStarred = [m[@"starred"] boolValue];
+    NSString *starTitle = isStarred ? WALoc(@"unstar_message") : WALoc(@"star_message");
+
     UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:(preview.length ? preview : nil)
                                                     delegate:self
                                            cancelButtonTitle:WALoc(@"cancel")
                                       destructiveButtonTitle:WALoc(@"delete_message")
-                                           otherButtonTitles:WALoc(@"copy"), nil];
+                                           otherButtonTitles:WALoc(@"copy"), starTitle, nil];
     as.tag = 200;
     if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
         UITableViewCell *cell = [self.table cellForRowAtIndexPath:ip];
@@ -631,6 +650,11 @@ static NSString *durationStr(unsigned int secs)
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [a dismissWithClickedButtonIndex:0 animated:YES]; });
             }
             self.selectedMsg = nil;
+        } else if (buttonIndex == 2) { // Star / Unstar
+            if (self.selectedMsg) {
+                [[WAChatStore shared] toggleStarMessage:self.selectedMsg inChat:self.jid];
+                self.selectedMsg = nil;
+            }
         }
     }
 }

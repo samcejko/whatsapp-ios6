@@ -120,7 +120,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (section == 0) return 2; // Call, Video Call
-    if (section == 1) return 2; // Messages count, Media count
+    if (section == 1) return 3; // Messages count, Media count, Starred count
     if (section == 2) return 2; // Clear Chat, Delete Chat
     return 0;
 }
@@ -147,7 +147,7 @@
         if (indexPath.row == 0) {
             cell.textLabel.text = WALoc(@"message_hint");
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu %@", (unsigned long)self.messages.count, WALoc(@"messages_count")];
-        } else {
+        } else if (indexPath.row == 1) {
             NSUInteger mediaCount = 0;
             for (NSDictionary *m in self.messages) {
                 int k = [m[@"kind"] intValue];
@@ -155,6 +155,10 @@
             }
             cell.textLabel.text = WALoc(@"media_shared");
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu %@", (unsigned long)mediaCount, WALoc(@"media_count")];
+        } else {
+            NSUInteger starCount = [[WAChatStore shared] starredMessagesForJID:self.jid].count;
+            cell.textLabel.text = [NSString stringWithFormat:@"★  %@", WALoc(@"starred_messages")];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)starCount];
         }
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.accessoryType = UITableViewCellAccessoryNone;

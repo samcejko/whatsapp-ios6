@@ -53,6 +53,11 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Clear all messages in all conversations (persist + notify).
 - (void)clearAllChats;
 
+// Star / unstar a message (persist + notify).
+- (void)toggleStarMessage:(NSDictionary *)msg inChat:(NSString *)jid;
+- (BOOL)isMessageStarred:(NSDictionary *)msg inChat:(NSString *)jid;
+- (NSArray *)starredMessagesForJID:(NSString *)jid;
+
 // Re-resolves contact names against AddressBook and push names, persists if changed.
 - (void)refreshContactNames;
 

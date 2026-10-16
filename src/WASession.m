@@ -2,6 +2,7 @@
 #import "WACommon.h"
 #import "WAChatStore.h"
 
+#import <AudioToolbox/AudioToolbox.h>
 #include "wa_store.h"
 #include "wa_client.h"
 #include "wa_sessions.h"
@@ -189,6 +190,7 @@ static void cb_node(void *ctx, const wa_node *node)
             }
 
             dispatch_async(dispatch_get_main_queue(), ^{
+                AudioServicesPlaySystemSound(1003);
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessage object:self userInfo:md];
             });
             wa_history_msg_free(&live_msg);

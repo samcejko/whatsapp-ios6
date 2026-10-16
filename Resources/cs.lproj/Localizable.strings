@@ -75,6 +75,7 @@
 "delete" = "Smazat";
 "contact_info" = "Informace";
 "messages_count" = "zpr\U00e1v";
+"media_shared" = "Sd\U00edlen\U00e1 m\U00e9dia";
 "media_count" = "m\U00e9di\U00ed";
 "chat_settings" = "Nastaven\U00ed chat\U016f";
 "refresh_contacts" = "Obnovit kontakty z Adres\U00e1\U0159e";
@@ -84,3 +85,7 @@
 "audio_codecs" = "Audio kodek";
 "about_app" = "O aplikaci";
 "version" = "Verze";
+"star_message" = "Ozna\U010dit hv\U011bzdi\U010dkou";
+"unstar_message" = "Odebrat hv\U011bzdi\U010dku";
+"starred_messages" = "Zpr\U00e1vy s hv\U011bzdi\U010dkou";
+"no_starred" = "\U017d\U00e1dn\U00e9 zpr\U00e1vy s hv\U011bzdi\U010dkou";

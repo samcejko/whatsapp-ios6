@@ -385,6 +385,67 @@ static NSString *msgSig(NSDictionary *m)
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
 }
 
+- (void)toggleStarMessage:(NSDictionary *)msg inChat:(NSString *)jid
+{
+    if (!jid.length || !msg) return;
+    NSString *key = [self keyFor:jid];
+    NSMutableDictionary *e = self.chats[key];
+    if (!e) return;
+    NSMutableArray *msgs = e[@"msgs"];
+    if (![msgs isKindOfClass:[NSMutableArray class]]) return;
+    NSString *targetSig = msgSig(msg);
+    BOOL changed = NO;
+    for (NSInteger i = 0; i < msgs.count; i++) {
+        id mObj = msgs[i];
+        if ([msgSig(mObj) isEqualToString:targetSig]) {
+            NSMutableDictionary *mut = [mObj isKindOfClass:[NSMutableDictionary class]] ? mObj : [mObj mutableCopy];
+            BOOL cur = [mut[@"starred"] boolValue];
+            mut[@"starred"] = @(!cur);
+            msgs[i] = mut;
+            changed = YES;
+            break;
+        }
+    }
+    if (changed) {
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": key }];
+    }
+}
+
+- (BOOL)isMessageStarred:(NSDictionary *)msg inChat:(NSString *)jid
+{
+    if (!jid.length || !msg) return NO;
+    NSString *key = [self keyFor:jid];
+    NSMutableDictionary *e = self.chats[key];
+    if (!e) return NO;
+    NSMutableArray *msgs = e[@"msgs"];
+    if (![msgs isKindOfClass:[NSMutableArray class]]) return NO;
+    NSString *targetSig = msgSig(msg);
+    for (NSDictionary *m in msgs) {
+        if ([msgSig(m) isEqualToString:targetSig]) {
+            return [m[@"starred"] boolValue];
+        }
+    }
+    return NO;
+}
+
+- (NSArray *)starredMessagesForJID:(NSString *)jid
+{
+    if (!jid.length) return @[];
+    NSString *key = [self keyFor:jid];
+    NSMutableDictionary *e = self.chats[key];
+    if (!e) return @[];
+    NSMutableArray *msgs = e[@"msgs"];
+    if (![msgs isKindOfClass:[NSMutableArray class]]) return @[];
+    NSMutableArray *res = [NSMutableArray array];
+    for (NSDictionary *m in msgs) {
+        if ([m[@"starred"] boolValue]) {
+            [res addObject:m];
+        }
+    }
+    return res;
+}
+
 - (void)refreshContactNames
 {
     WAReloadAddressBookCache();
