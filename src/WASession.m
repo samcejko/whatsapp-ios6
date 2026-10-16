@@ -15,6 +15,7 @@ NSString *const WASessionNodeReceived = @"WASessionNodeReceived";
 NSString *const WASessionMessage = @"WASessionMessage";
 NSString *const WASessionMessageStatus = @"WASessionMessageStatus";
 NSString *const WASessionConversations = @"WASessionConversations";
+NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
 
 @interface WASession () {
 @public
@@ -216,6 +217,32 @@ static void cb_node(void *ctx, const wa_node *node)
             }
         }
     }
+    if (wa_node_tag_is(node, "presence")) {
+        const char *from = wa_node_get(node, "from");
+        const char *type = wa_node_get(node, "type");
+        const char *last = wa_node_get(node, "last");
+        if (from && from[0]) {
+            NSString *f = [NSString stringWithUTF8String:from];
+            NSString *t = type ? [NSString stringWithUTF8String:type] : @"available";
+            NSMutableDictionary *ui = [NSMutableDictionary dictionaryWithObjectsAndKeys:f, @"jid", t, @"state", nil];
+            if (last) ui[@"last"] = [NSString stringWithUTF8String:last];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionPresenceChanged object:self userInfo:ui];
+            });
+        }
+    }
+    if (wa_node_tag_is(node, "chatstate")) {
+        const char *from = wa_node_get(node, "from");
+        if (from && from[0]) {
+            NSString *f = [NSString stringWithUTF8String:from];
+            NSString *state = @"paused";
+            if (wa_node_child(node, "composing")) state = @"composing";
+            else if (wa_node_child(node, "paused")) state = @"paused";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionPresenceChanged object:self userInfo:@{ @"jid": f, @"state": state }];
+            });
+        }
+    }
 
     char *s = wa_node_to_string(node, 0);
     NSString *xml = s ? [NSString stringWithUTF8String:s] : nil;
@@ -405,6 +432,60 @@ static void action_place_call(wa_client *c, void *ctx)
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
     a->video = video ? 1 : 0;
     if (wa_client_post(_client, action_place_call, a) != 0) free(a);
+}
+
+typedef struct {
+    char jid[80];
+    char state[32];
+} wa_presence_ctx;
+
+static void action_send_presence(wa_client *c, void *ctx)
+{
+    wa_presence_ctx *p = (wa_presence_ctx *)ctx;
+    wa_node *n = wa_node_new("presence");
+    wa_node_attr(n, "type", p->state);
+    wa_node_attr(n, "to", p->jid);
+    wa_client_send(c, n);
+    wa_node_free(n);
+    free(p);
+}
+
+static void action_send_chatstate(wa_client *c, void *ctx)
+{
+    wa_presence_ctx *p = (wa_presence_ctx *)ctx;
+    wa_node *n = wa_node_new("chatstate");
+    wa_node_attr(n, "to", p->jid);
+    wa_node_add_new(n, p->state);
+    wa_client_send(c, n);
+    wa_node_free(n);
+    free(p);
+}
+
+- (void)subscribePresence:(NSString *)jid
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    snprintf(p->state, sizeof p->state, "subscribe");
+    if (wa_client_post(_client, action_send_presence, p) != 0) free(p);
+}
+
+- (void)unsubscribePresence:(NSString *)jid
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    snprintf(p->state, sizeof p->state, "unsubscribe");
+    if (wa_client_post(_client, action_send_presence, p) != 0) free(p);
+}
+
+- (void)sendChatState:(BOOL)composing toJID:(NSString *)jid
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    snprintf(p->state, sizeof p->state, "%s", composing ? "composing" : "paused");
+    if (wa_client_post(_client, action_send_chatstate, p) != 0) free(p);
 }
 
 - (void)dealloc { if (_sessions) free(_sessions); }

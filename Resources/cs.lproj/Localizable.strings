@@ -54,4 +54,7 @@
 "ok" = "OK";
 "downloading" = "Stahov\U00e1n\U00ed\U2026";
 "download_failed" = "Soubor se nepoda\U0159ilo st\U00e1hnout";
+"online" = "online";
+"last_seen" = "naposledy";
+
 

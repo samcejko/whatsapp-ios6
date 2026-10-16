@@ -9,6 +9,7 @@ extern NSString *const WASessionNodeReceived;    // userInfo: @"xml" (NSString, 
 extern NSString *const WASessionMessage;         // userInfo: @"from" (bare JID), @"text"
 extern NSString *const WASessionMessageStatus;   // userInfo: @"id" (NSString), @"status" (NSNumber), @"error" (NSString, optional)
 extern NSString *const WASessionConversations;   // userInfo: @"conversations" (NSArray of @{jid,name,last,ts,unread}) from a history-sync chunk
+extern NSString *const WASessionPresenceChanged; // userInfo: @"jid" (NSString), @"state" (NSString: available/unavailable/composing/paused), @"last" (NSString, optional)
 
 typedef NS_ENUM(NSInteger, WASessionState) {
     WASessionStateDisconnected = 0,
@@ -36,5 +37,11 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 - (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid;
 // Place a 1:1 call to a bare user JID. Sends the encrypted <offer>; the media comes up on the client thread.
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video;
+
+// Subscribe/unsubscribe to presence updates for a contact JID
+- (void)subscribePresence:(NSString *)jid;
+- (void)unsubscribePresence:(NSString *)jid;
+// Send typing indicator (composing = YES) or idle (composing = NO)
+- (void)sendChatState:(BOOL)composing toJID:(NSString *)jid;
 
 @end

@@ -54,4 +54,7 @@
 "ok" = "OK";
 "downloading" = "Downloading\U2026";
 "download_failed" = "Failed to download file";
+"online" = "online";
+"last_seen" = "last seen";
+
 

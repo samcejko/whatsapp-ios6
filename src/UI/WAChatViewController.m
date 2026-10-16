@@ -19,6 +19,7 @@
 @property (nonatomic, strong) UIButton *send;
 @property (nonatomic) CGFloat kbHeight;
 @property (nonatomic, strong) UIDocumentInteractionController *docController;
+@property (nonatomic, strong) UILabel *subtitleLabel;
 @end
 
 @implementation WAChatViewController
@@ -49,6 +50,23 @@
     [video addTarget:self action:@selector(videoCall) forControlEvents:UIControlEventTouchUpInside];
     self.navigationItem.rightBarButtonItems = @[ [[UIBarButtonItem alloc] initWithCustomView:video],
                                                  [[UIBarButtonItem alloc] initWithCustomView:call] ];
+
+    UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 180, 44)];
+    UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 180, 20)];
+    titleLbl.text = self.title;
+    titleLbl.font = [UIFont boldSystemFontOfSize:17];
+    titleLbl.textColor = [UIColor whiteColor];
+    titleLbl.textAlignment = NSTextAlignmentCenter;
+    titleLbl.backgroundColor = [UIColor clearColor];
+    [tv addSubview:titleLbl];
+
+    self.subtitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 24, 180, 16)];
+    self.subtitleLabel.font = [UIFont systemFontOfSize:11];
+    self.subtitleLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1.0];
+    self.subtitleLabel.textAlignment = NSTextAlignmentCenter;
+    self.subtitleLabel.backgroundColor = [UIColor clearColor];
+    [tv addSubview:self.subtitleLabel];
+    self.navigationItem.titleView = tv;
 
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
     self.table.backgroundColor = [UIColor clearColor];
@@ -83,6 +101,9 @@
     [nc addObserver:self selector:@selector(kbHide:) name:UIKeyboardWillHideNotification object:nil];
     [nc addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
     [nc addObserver:self selector:@selector(onAudioPlayerState:) name:WAAudioPlayerStateChanged object:nil];
+    [nc addObserver:self selector:@selector(onPresence:) name:WASessionPresenceChanged object:nil];
+
+    [[WASession shared] subscribePresence:self.jid];
 
     [self loadMessages];
     [self.table reloadData];
@@ -93,6 +114,29 @@
 {
     [super viewWillDisappear:animated];
     [[WAAudioPlayer shared] stop];
+    [[WASession shared] unsubscribePresence:self.jid];
+    [[WASession shared] sendChatState:NO toJID:self.jid];
+}
+
+- (void)onPresence:(NSNotification *)n
+{
+    NSString *fromJid = n.userInfo[@"jid"];
+    if (!fromJid.length || [fromJid rangeOfString:jidKey(self.jid)].location == NSNotFound) return;
+    NSString *st = n.userInfo[@"state"];
+    if ([st isEqualToString:@"composing"]) {
+        self.subtitleLabel.text = WALoc(@"typing");
+    } else if ([st isEqualToString:@"available"]) {
+        self.subtitleLabel.text = WALoc(@"online");
+    } else if ([st isEqualToString:@"unavailable"]) {
+        NSString *last = n.userInfo[@"last"];
+        if (last.length) {
+            self.subtitleLabel.text = [NSString stringWithFormat:@"%@ %@", WALoc(@"last_seen"), WAClockTime([last unsignedLongLongValue])];
+        } else {
+            self.subtitleLabel.text = @"";
+        }
+    } else if ([st isEqualToString:@"paused"]) {
+        self.subtitleLabel.text = WALoc(@"online");
+    }
 }
 
 - (void)onAudioPlayerState:(NSNotification *)n
@@ -222,6 +266,18 @@ static NSString *durationStr(unsigned int secs)
     [UIView animateWithDuration:0.25 animations:^{ [self viewDidLayoutSubviews]; }];
 }
 
+- (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string
+{
+    NSString *newText = [textField.text stringByReplacingCharactersInRange:range withString:string];
+    [[WASession shared] sendChatState:(newText.length > 0) toJID:self.jid];
+    return YES;
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField
+{
+    [[WASession shared] sendChatState:NO toJID:self.jid];
+}
+
 - (BOOL)textFieldShouldReturn:(UITextField *)tf { [self sendTapped]; return NO; }
 
 - (void)sendTapped
@@ -229,6 +285,7 @@ static NSString *durationStr(unsigned int secs)
     NSString *text = [self.field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!text.length) return;
     self.field.text = @"";
+    [[WASession shared] sendChatState:NO toJID:self.jid];
     NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
     [[WAChatStore shared] recordOutgoing:text toJID:self.jid msgId:mid status:WAMessageStatusPending];
     [[WASession shared] sendText:text toJID:self.jid msgId:mid];
