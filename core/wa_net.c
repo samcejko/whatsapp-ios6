@@ -184,19 +184,27 @@ static sock_t tcp_connect(const char *host, int port, int timeout_ms, char *err,
     }
 #endif
     sock_t fd = SOCK_INVALID;
-    for (ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd == SOCK_INVALID) continue;
-        set_nonblocking(fd);
-        if (connect(fd, ai->ai_addr, (int)ai->ai_addrlen) == 0) break;
-        if (sock_would_block() && wait_fd(fd, 1, timeout_ms) == 1) {
-            int soerr = 0;
-            socklen_t sl = sizeof soerr;
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &sl);
-            if (soerr == 0) break;
+    // Prefer IPv4 and cap each attempt. On a cellular/hotspot link the IPv6 (AAAA) route often black-holes, and a
+    // full 15 s stall on each dead address made the first connect — and the QR that waits on it — take forever.
+    // Try A records first, then AAAA, giving each address at most ~5 s so a dead one falls through fast.
+    int per = timeout_ms > 5000 ? 5000 : timeout_ms;
+    for (int pass = 0; pass < 2 && fd == SOCK_INVALID; pass++) {
+        int want = pass == 0 ? AF_INET : AF_INET6;
+        for (ai = res; ai; ai = ai->ai_next) {
+            if (ai->ai_family != want) continue;
+            fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+            if (fd == SOCK_INVALID) continue;
+            set_nonblocking(fd);
+            if (connect(fd, ai->ai_addr, (int)ai->ai_addrlen) == 0) break;
+            if (sock_would_block() && wait_fd(fd, 1, per) == 1) {
+                int soerr = 0;
+                socklen_t sl = sizeof soerr;
+                getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &sl);
+                if (soerr == 0) break;
+            }
+            sock_close(fd);
+            fd = SOCK_INVALID;
         }
-        sock_close(fd);
-        fd = SOCK_INVALID;
     }
     freeaddrinfo(res);
     if (fd == SOCK_INVALID) { snprintf(err, errlen, "cannot connect to %s:%d", host, port); return SOCK_INVALID; }
