@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <zlib.h>
 #ifndef _WIN32
 #include <pthread.h>
 #endif
@@ -221,23 +220,7 @@ fail:
 
 static int inflate_payload(const uint8_t *in, size_t len, wa_buf *out)
 {
-    z_stream z;
-    memset(&z, 0, sizeof z);
-    if (inflateInit(&z) != Z_OK) return -1;
-    z.next_in = (Bytef *)in;
-    z.avail_in = (uInt)len;
-    uint8_t tmp[16384];
-    int rc;
-    do {
-        z.next_out = tmp;
-        z.avail_out = sizeof tmp;
-        rc = inflate(&z, Z_NO_FLUSH);
-        if (rc != Z_OK && rc != Z_STREAM_END) { inflateEnd(&z); return -1; }
-        if (wa_buf_append(out, tmp, sizeof tmp - z.avail_out) != 0) { inflateEnd(&z); return -1; }
-        if (out->len > (16u << 20)) { inflateEnd(&z); return -1; }
-    } while (rc != Z_STREAM_END);
-    inflateEnd(&z);
-    return 0;
+    return wa_zlib_inflate(in, len, out);   // shared helper in wa_util
 }
 
 static void send_ack(wa_client *c, const wa_node *req)

@@ -7,6 +7,7 @@ extern NSString *const WASessionQRChanged;       // userInfo: @"qr" (NSString)
 extern NSString *const WASessionPaired;          // userInfo: @"jid"
 extern NSString *const WASessionNodeReceived;    // userInfo: @"xml" (NSString, debug render)
 extern NSString *const WASessionMessage;         // userInfo: @"from" (bare JID), @"text"
+extern NSString *const WASessionConversations;   // userInfo: @"conversations" (NSArray of @{jid,name,last,ts,unread}) from a history-sync chunk
 
 typedef NS_ENUM(NSInteger, WASessionState) {
     WASessionStateDisconnected = 0,

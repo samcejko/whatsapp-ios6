@@ -5,6 +5,7 @@
 #include "wa_client.h"
 #include "wa_sessions.h"
 #include "wa_chat.h"
+#include "wa_history.h"
 #include "wa_callengine.h"
 
 NSString *const WASessionStateChanged = @"WASessionStateChanged";
@@ -12,6 +13,7 @@ NSString *const WASessionQRChanged = @"WASessionQRChanged";
 NSString *const WASessionPaired = @"WASessionPaired";
 NSString *const WASessionNodeReceived = @"WASessionNodeReceived";
 NSString *const WASessionMessage = @"WASessionMessage";
+NSString *const WASessionConversations = @"WASessionConversations";
 
 @interface WASession () {
 @public
@@ -88,9 +90,30 @@ static void cb_node(void *ctx, const wa_node *node)
 
     if (wa_node_tag_is(node, "message")) {
         char from[80] = { 0 };
-        char *text = wa_chat_handle_message(self->_client, self->_sessions, node, from, sizeof from);
+        wa_history_result hist;
+        int is_history = 0;
+        char *text = wa_chat_handle_message(self->_client, self->_sessions, node, from, sizeof from, &hist, &is_history);
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
         send_ack(self, node, "message");
+        if (is_history && hist.nconvs > 0) {
+            NSMutableArray *convs = [NSMutableArray arrayWithCapacity:hist.nconvs];
+            for (int i = 0; i < hist.nconvs; i++) {
+                wa_history_conv *cv = &hist.convs[i];
+                NSString *jid = cv->jid ? [NSString stringWithUTF8String:cv->jid] : nil;
+                if (!jid) continue;   // stringWithUTF8String returns nil on invalid UTF-8; skip rather than crash
+                NSString *name = cv->name ? [NSString stringWithUTF8String:cv->name] : nil;
+                NSString *last = cv->last ? [NSString stringWithUTF8String:cv->last] : nil;
+                [convs addObject:@{ @"jid": jid,
+                                    @"name": name ?: @"",
+                                    @"last": last ?: @"",
+                                    @"ts": @(cv->timestamp),
+                                    @"unread": @(cv->unread) }];
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionConversations object:self userInfo:@{ @"conversations": convs }];
+            });
+        }
+        wa_history_result_free(&hist);
         if (text) {
             NSString *f = [NSString stringWithUTF8String:from];
             NSString *t = [NSString stringWithUTF8String:text];

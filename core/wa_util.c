@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <zlib.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -56,6 +57,27 @@ int wa_buf_append(wa_buf *b, const void *data, size_t len)
 int wa_buf_append_byte(wa_buf *b, uint8_t v) { return wa_buf_append(b, &v, 1); }
 
 int wa_buf_append_str(wa_buf *b, const char *s) { return wa_buf_append(b, s, strlen(s)); }
+
+int wa_zlib_inflate(const uint8_t *in, size_t len, wa_buf *out)
+{
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    if (inflateInit(&z) != Z_OK) return -1;
+    z.next_in = (Bytef *)in;
+    z.avail_in = (uInt)len;
+    uint8_t tmp[16384];
+    int rc;
+    do {
+        z.next_out = tmp;
+        z.avail_out = sizeof tmp;
+        rc = inflate(&z, Z_NO_FLUSH);
+        if (rc != Z_OK && rc != Z_STREAM_END) { inflateEnd(&z); return -1; }
+        if (wa_buf_append(out, tmp, sizeof tmp - z.avail_out) != 0) { inflateEnd(&z); return -1; }
+        if (out->len > (16u << 20)) { inflateEnd(&z); return -1; }
+    } while (rc != Z_STREAM_END);
+    inflateEnd(&z);
+    return 0;
+}
 
 void wa_buf_consume(wa_buf *b, size_t n)
 {

@@ -31,6 +31,8 @@ void wa_net_init(void);
 
 // A plain HTTPS GET (for the WhatsApp Web version lookup). Returns the body (malloc'd, NUL-terminated) or NULL.
 char *wa_https_get(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status);
+// Binary-safe HTTPS GET (for media blobs, which contain NULs). Returns the body (malloc'd, *outlen bytes) or NULL.
+uint8_t *wa_https_get_bin(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status, size_t *outlen);
 
 #ifdef __cplusplus
 }

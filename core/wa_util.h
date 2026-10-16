@@ -72,6 +72,9 @@ static inline uint32_t wa_get_u32(const uint8_t *p) { return ((uint32_t)p[0] << 
 int wa_ct_compare(const void *a, const void *b, size_t len);
 void wa_wipe(void *p, size_t len);
 
+// Inflate a zlib stream (RFC 1950, zlib header) into out. Appends. Caps the output at 16 MiB. Returns 0 or -1.
+int wa_zlib_inflate(const uint8_t *in, size_t len, wa_buf *out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,6 +5,7 @@
 #include "wa_store.h"
 #include "wa_node.h"
 #include "wa_util.h"
+#include "wa_history.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -138,8 +139,28 @@ int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user
     return rc;
 }
 
-char *wa_chat_handle_message(wa_client *c, wa_sess_store *sessions, const wa_node *message, char *frombuf, size_t fromcap)
+// Acknowledge a delivered history-sync chunk: <receipt to="<own pn>" id="<msg id>" type="hist_sync"/>. Without this
+// the phone keeps re-uploading the chunk. (Confirmed vs whatsapp-rust send_protocol_receipt / ReceiptType::HistorySync.)
+static void send_hist_sync_receipt(wa_client *c, const char *msg_id)
 {
+    if (!msg_id) return;
+    const char *pn = wa_client_device(c)->pn;
+    if (!pn[0]) return;
+    char own[80];
+    wa_jid_to_non_ad(pn, own, sizeof own);
+    wa_node *r = wa_node_new("receipt");
+    wa_node_attr(r, "to", own);
+    wa_node_attr(r, "id", msg_id);
+    wa_node_attr(r, "type", "hist_sync");
+    wa_client_send(c, r);
+    wa_node_free(r);
+}
+
+char *wa_chat_handle_message(wa_client *c, wa_sess_store *sessions, const wa_node *message, char *frombuf, size_t fromcap,
+                             wa_history_result *hist, int *is_history)
+{
+    if (hist) memset(hist, 0, sizeof *hist);
+    if (is_history) *is_history = 0;
     wa_msg_incoming in;
     if (!wa_msg_parse_incoming(message, &in) || !in.from) return NULL;
     wa_jid_to_non_ad(in.from, frombuf, fromcap);
@@ -174,6 +195,19 @@ char *wa_chat_handle_message(wa_client *c, wa_sess_store *sessions, const wa_nod
     wa_buf_init(&msg);
     int rc = wa_msg_decrypt(use, &id, &spk, otp_ptr, is_prekey, in.enc, in.enc_len, &msg);
     if (rc == 0) wa_sess_put(sessions, in.from, use);   // persist the advanced/established session
+
+    // A linked device's initial history arrives as a peer protocolMessage/historySyncNotification. Hand the decrypted
+    // Message to the history module; if it is one, acknowledge the chunk and surface its conversations (not text).
+    if (rc == 0 && hist) {
+        int h = wa_history_from_message(msg.data, msg.len, NULL /* CDN TLS unverified; blob HMAC authenticates it */, hist);
+        if (h != 0) {
+            send_hist_sync_receipt(c, in.id);
+            if (is_history) *is_history = (h == 1);
+            wa_buf_free(&msg);
+            return NULL;
+        }
+    }
+
     char *text = rc == 0 ? wa_msg_parse_text(msg.data, msg.len) : NULL;
     wa_buf_free(&msg);
     return text;

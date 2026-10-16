@@ -539,18 +539,18 @@ void wa_ws_close(wa_ws *ws)
     free(ws);
 }
 
-char *wa_https_get(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status)
+// Shared HTTPS GET: fetches host/path into `out` (raw body bytes, binary-safe, no trailing NUL counted in out->len).
+// Returns the HTTP status (> 0) or -1. The caller owns `out`.
+static int https_fetch(const char *host, const char *path, const char *ca_file, int timeout_ms, wa_buf *out)
 {
     char err[160];
-    if (status) *status = 0;
     wa_ws *c = connect_tls(host, 443, ca_file, timeout_ms, err, sizeof err);
-    if (!c) { wa_log("https %s: %s", host, err); return NULL; }
+    if (!c) { wa_log("https %s: %s", host, err); return -1; }
     char req[1024];
     snprintf(req, sizeof req,
              "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
              path, host);
-    char *body = NULL;
     char head[4096];
     int st = -1;
     if (tls_write_all(c, (const uint8_t *)req, strlen(req)) == 0) st = read_http_head(c, timeout_ms, head, sizeof head);
@@ -575,8 +575,6 @@ char *wa_https_get(const char *host, const char *path, const char *ca_file, int 
             if (r < 0) break;
             if (chunked && c->raw.len >= 5 && memcmp(c->raw.data + c->raw.len - 5, "0\r\n\r\n", 5) == 0) break;
         }
-        wa_buf out;
-        wa_buf_init(&out);
         wa_buf_append_byte(&c->raw, 0);   // a terminator for the string scans below (not part of the body)
         c->raw.len--;
         if (chunked) {
@@ -587,17 +585,41 @@ char *wa_https_get(const char *host, const char *path, const char *ca_file, int 
                 if (n <= 0 || !crlf) break;
                 pos = (size_t)(crlf - c->raw.data) + 2;
                 if (pos + (size_t)n > c->raw.len) n = (long)(c->raw.len - pos);
-                wa_buf_append(&out, c->raw.data + pos, (size_t)n);
+                wa_buf_append(out, c->raw.data + pos, (size_t)n);
                 pos += (size_t)n + 2;
             }
         } else {
-            wa_buf_append(&out, c->raw.data, c->raw.len);
+            wa_buf_append(out, c->raw.data, c->raw.len);
         }
-        wa_buf_append_byte(&out, 0);
-        body = (char *)wa_buf_detach(&out, NULL);
     }
-    if (status) *status = st;
     c->closed = 1;
     wa_ws_close(c);
+    return st;
+}
+
+char *wa_https_get(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status)
+{
+    if (status) *status = 0;
+    wa_buf out;
+    wa_buf_init(&out);
+    int st = https_fetch(host, path, ca_file, timeout_ms, &out);
+    if (status) *status = st;
+    if (st <= 0) { wa_buf_free(&out); return NULL; }
+    wa_buf_append_byte(&out, 0);   // NUL-terminate for the string API (not part of the body length)
+    return (char *)wa_buf_detach(&out, NULL);
+}
+
+uint8_t *wa_https_get_bin(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status, size_t *outlen)
+{
+    if (status) *status = 0;
+    if (outlen) *outlen = 0;
+    wa_buf out;
+    wa_buf_init(&out);
+    int st = https_fetch(host, path, ca_file, timeout_ms, &out);
+    if (status) *status = st;
+    if (st <= 0 || out.len == 0) { wa_buf_free(&out); return NULL; }
+    size_t n = 0;
+    uint8_t *body = wa_buf_detach(&out, &n);
+    if (outlen) *outlen = n;
     return body;
 }
