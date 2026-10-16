@@ -15,6 +15,8 @@ NSString *WAClockTime(uint64_t ts);
 NSString *WAListTime(uint64_t ts);
 // Day label for a date separator: localized "Today"/"Yesterday", the weekday this week, else a medium date.
 NSString *WADayLabel(uint64_t ts);
+// Resolve contact name from device address book by phone number / JID user part
+NSString *WAAddressBookNameForNumber(NSString *number);
 #ifdef __cplusplus
 }
 #endif

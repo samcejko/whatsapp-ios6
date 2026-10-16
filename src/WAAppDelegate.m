@@ -21,6 +21,7 @@
     self.window.backgroundColor = [UIColor whiteColor];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPaired:) name:WASessionPaired object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onIncomingCall:) name:WASessionIncomingCall object:nil];
 
     [WAChatStore shared];   // start observing history-sync + message notifications before the session connects
 
@@ -30,6 +31,27 @@
     [self.window makeKeyAndVisible];
     [[WASession shared] start];
     return YES;
+}
+
+- (void)onIncomingCall:(NSNotification *)n
+{
+    NSString *jid = n.userInfo[@"jid"];
+    BOOL video = [n.userInfo[@"video"] boolValue];
+    NSString *key = [WAChatStore keyForJID:jid];
+    NSString *name = WAAddressBookNameForNumber(key) ?: [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+
+    if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
+        UILocalNotification *notif = [[UILocalNotification alloc] init];
+        notif.alertBody = [NSString stringWithFormat:@"%@: %@", video ? WALoc(@"call_incoming_video") : WALoc(@"call_incoming"), name];
+        notif.soundName = UILocalNotificationDefaultSoundName;
+        [[UIApplication sharedApplication] presentLocalNotificationNow:notif];
+    }
+
+    WACallViewController *c = [[WACallViewController alloc] initWithJID:jid name:name video:video incoming:YES];
+    c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    UIViewController *top = self.window.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    [top presentViewController:c animated:YES completion:nil];
 }
 
 - (void)onPaired:(NSNotification *)n
@@ -136,6 +158,14 @@
         [self.window.rootViewController presentViewController:c animated:NO completion:nil];
         return YES;
     }
+    if ([cmd isEqualToString:@"newchat"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+        [nav popToRootViewControllerAnimated:NO];
+        if ([nav.topViewController respondsToSelector:@selector(newChat)]) {
+            [(WAChatsViewController *)nav.topViewController newChat];
+        }
+        return YES;
+    }
     return NO;
 }
 
@@ -145,7 +175,10 @@
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
     // Keep the VoIP connection alive in the background so incoming calls still ring (best-effort on iOS 6).
-    WALog(@"entered background; connection kept for calls");
+    WALog(@"entered background; configuring VoIP keep-alive");
+    [application setKeepAliveTimeout:600 handler:^{
+        WALog(@"VoIP keepalive triggered");
+    }];
 }
 
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }

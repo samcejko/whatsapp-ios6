@@ -15,8 +15,10 @@
 @property (nonatomic, strong) NSMutableArray *messages;   // @{ @"out", @"kind", @"display", @"image"(optional), @"sender" }
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UIView *bar;
+@property (nonatomic, strong) UIButton *attach;
 @property (nonatomic, strong) UITextField *field;
 @property (nonatomic, strong) UIButton *send;
+@property (nonatomic, strong) UIPopoverController *popover;
 @property (nonatomic) CGFloat kbHeight;
 @property (nonatomic, strong) UIDocumentInteractionController *docController;
 @property (nonatomic, strong) UILabel *subtitleLabel;
@@ -80,6 +82,14 @@
     self.bar = [[UIView alloc] init];
     self.bar.backgroundColor = [UIColor colorWithWhite:0.93 alpha:1.0];
     [self.view addSubview:self.bar];
+
+    self.attach = [UIButton buttonWithType:UIButtonTypeCustom];
+    [self.attach setTitle:@"+" forState:UIControlStateNormal];
+    [self.attach setTitleColor:[UIColor colorWithWhite:0.35 alpha:1.0] forState:UIControlStateNormal];
+    self.attach.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+    [self.attach setBackgroundImage:[WATheme glossyButtonWithColor:[UIColor colorWithWhite:0.85 alpha:1.0]] forState:UIControlStateNormal];
+    [self.attach addTarget:self action:@selector(attachTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.bar addSubview:self.attach];
 
     self.field = [[UITextField alloc] init];
     self.field.borderStyle = UITextBorderStyleRoundedRect;
@@ -253,9 +263,62 @@ static NSString *durationStr(unsigned int secs)
     CGFloat w = self.view.bounds.size.width, h = self.view.bounds.size.height;
     CGFloat barH = 46;
     self.bar.frame = CGRectMake(0, h - barH - self.kbHeight, w, barH);
-    self.field.frame = CGRectMake(8, 7, w - 8 - 70 - 8, barH - 14);
+    CGFloat btnW = 34;
+    self.attach.frame = CGRectMake(8, 7, btnW, barH - 14);
+    CGFloat fx = 8 + btnW + 6;
+    self.field.frame = CGRectMake(fx, 7, w - fx - 70 - 8, barH - 14);
     self.send.frame = CGRectMake(w - 70 - 8, 7, 70, barH - 14);
     self.table.frame = CGRectMake(0, 0, w, h - barH - self.kbHeight);
+}
+
+- (void)attachTapped
+{
+    if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
+        UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+        picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+        picker.delegate = self;
+        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+            self.popover = [[UIPopoverController alloc] initWithContentViewController:picker];
+            [self.popover presentPopoverFromRect:self.attach.bounds inView:self.attach permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
+        } else {
+            [self presentViewController:picker animated:YES completion:nil];
+        }
+    }
+}
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+{
+    UIImage *orig = info[UIImagePickerControllerOriginalImage];
+    if (orig) {
+        CGSize sz = orig.size;
+        CGFloat maxD = 240.0;
+        CGFloat scale = (sz.width > maxD || sz.height > maxD) ? MIN(maxD / sz.width, maxD / sz.height) : 1.0;
+        CGSize newSz = CGSizeMake(floorf(sz.width * scale), floorf(sz.height * scale));
+        UIGraphicsBeginImageContextWithOptions(newSz, NO, 1.0);
+        [orig drawInRect:CGRectMake(0, 0, newSz.width, newSz.height)];
+        UIImage *thumbImg = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        NSData *thumbData = UIImageJPEGRepresentation(thumbImg, 0.7);
+
+        NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+        [[WAChatStore shared] recordOutgoingMedia:thumbData caption:nil toJID:self.jid msgId:mid status:WAMessageStatusSent];
+    }
+    if (self.popover) {
+        [self.popover dismissPopoverAnimated:YES];
+        self.popover = nil;
+    } else {
+        [picker dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+    if (self.popover) {
+        [self.popover dismissPopoverAnimated:YES];
+        self.popover = nil;
+    } else {
+        [picker dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 - (void)kbShow:(NSNotification *)n

@@ -6,6 +6,7 @@
 #import "../WASession.h"
 #import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
+#import <AddressBookUI/AddressBookUI.h>
 
 // A WhatsApp-style chat-list row: avatar, name, last-message preview, time, unread badge.
 @interface WAChatCell : UITableViewCell
@@ -49,7 +50,7 @@
 }
 @end
 
-@interface WAChatsViewController () <UISearchBarDelegate>
+@interface WAChatsViewController () <UISearchBarDelegate, UIActionSheetDelegate, ABPeoplePickerNavigationControllerDelegate>
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UILabel *empty;
 @property (nonatomic, strong) UILabel *banner;
@@ -109,10 +110,13 @@
     [self refreshBanner:[WASession shared].state];
 }
 
-// A display name for a chat: the history/contact name when we have one, else the number before the "@".
+// A display name for a chat: the history/contact name when we have one, else address book or number before "@".
 - (NSString *)displayNameFor:(NSString *)jid name:(NSString *)name
 {
     if (name.length) return name;
+    NSString *key = [WAChatStore keyForJID:jid];
+    NSString *ab = WAAddressBookNameForNumber(key);
+    if (ab.length) return ab;
     return [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
 }
 
@@ -199,20 +203,106 @@
 
 - (void)newChat
 {
-    UIAlertView *a = [[UIAlertView alloc] initWithTitle:WALoc(@"chats_title") message:@"+country number"
-                                               delegate:self cancelButtonTitle:WALoc(@"cancel") otherButtonTitles:@"OK", nil];
-    a.tag = 2;
-    a.alertViewStyle = UIAlertViewStylePlainTextInput;
-    [[a textFieldAtIndex:0] setKeyboardType:UIKeyboardTypePhonePad];
-    [a show];
+    UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:nil
+                                                       delegate:self
+                                              cancelButtonTitle:WALoc(@"cancel")
+                                         destructiveButtonTitle:nil
+                                              otherButtonTitles:WALoc(@"choose_contact"), WALoc(@"enter_number"), nil];
+    sheet.tag = 100;
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        [sheet showFromBarButtonItem:self.navigationItem.rightBarButtonItem animated:YES];
+    } else {
+        [sheet showInView:self.view];
+    }
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (actionSheet.tag == 100) {
+        if (buttonIndex == 0) {
+            ABPeoplePickerNavigationController *picker = [[ABPeoplePickerNavigationController alloc] init];
+            picker.peoplePickerDelegate = self;
+            [self presentViewController:picker animated:YES completion:nil];
+        } else if (buttonIndex == 1) {
+            UIAlertView *a = [[UIAlertView alloc] initWithTitle:WALoc(@"enter_number") message:@"+country number"
+                                                       delegate:self cancelButtonTitle:WALoc(@"cancel") otherButtonTitles:@"OK", nil];
+            a.tag = 2;
+            a.alertViewStyle = UIAlertViewStylePlainTextInput;
+            [[a textFieldAtIndex:0] setKeyboardType:UIKeyboardTypePhonePad];
+            [a show];
+        }
+    }
+}
+
+- (void)peoplePickerNavigationControllerDidCancel:(ABPeoplePickerNavigationController *)peoplePicker
+{
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (BOOL)peoplePickerNavigationController:(ABPeoplePickerNavigationController *)peoplePicker
+      shouldContinueAfterSelectingPerson:(ABRecordRef)person
+{
+    ABMultiValueRef phones = ABRecordCopyValue(person, kABPersonPhoneProperty);
+    if (phones) {
+        CFIndex count = ABMultiValueGetCount(phones);
+        if (count == 1) {
+            CFStringRef ph = ABMultiValueCopyValueAtIndex(phones, 0);
+            NSString *phoneStr = [NSString stringWithString:(__bridge NSString *)ph];
+            CFRelease(ph);
+            CFStringRef fn = ABRecordCopyCompositeName(person);
+            NSString *fullName = fn ? [NSString stringWithString:(__bridge NSString *)fn] : nil;
+            if (fn) CFRelease(fn);
+            CFRelease(phones);
+            [self dismissViewControllerAnimated:YES completion:^{
+                [self openChatWithNumber:phoneStr name:fullName];
+            }];
+            return NO;
+        }
+        CFRelease(phones);
+    }
+    return YES;
+}
+
+- (BOOL)peoplePickerNavigationController:(ABPeoplePickerNavigationController *)peoplePicker
+      shouldContinueAfterSelectingPerson:(ABRecordRef)person
+                                property:(ABPropertyID)property
+                              identifier:(ABMultiValueIdentifier)identifier
+{
+    if (property == kABPersonPhoneProperty) {
+        ABMultiValueRef phones = ABRecordCopyValue(person, kABPersonPhoneProperty);
+        if (phones) {
+            CFIndex idx = ABMultiValueGetIndexForIdentifier(phones, identifier);
+            if (idx != -1) {
+                CFStringRef ph = ABMultiValueCopyValueAtIndex(phones, idx);
+                NSString *phoneStr = [NSString stringWithString:(__bridge NSString *)ph];
+                CFRelease(ph);
+                CFStringRef fn = ABRecordCopyCompositeName(person);
+                NSString *fullName = fn ? [NSString stringWithString:(__bridge NSString *)fn] : nil;
+                if (fn) CFRelease(fn);
+                CFRelease(phones);
+                [self dismissViewControllerAnimated:YES completion:^{
+                    [self openChatWithNumber:phoneStr name:fullName];
+                }];
+                return NO;
+            }
+            CFRelease(phones);
+        }
+    }
+    return NO;
 }
 
 - (void)openChatWithNumber:(NSString *)num
 {
+    [self openChatWithNumber:num name:nil];
+}
+
+- (void)openChatWithNumber:(NSString *)num name:(NSString *)name
+{
     NSString *digits = [[num componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
     if (!digits.length) return;
     NSString *jid = [digits stringByAppendingString:@"@s.whatsapp.net"];
-    WAChatViewController *c = [[WAChatViewController alloc] initWithJID:jid name:num];
+    if (!name.length) name = WAAddressBookNameForNumber(digits) ?: num;
+    WAChatViewController *c = [[WAChatViewController alloc] initWithJID:jid name:name];
     [self.navigationController pushViewController:c animated:YES];
 }
 

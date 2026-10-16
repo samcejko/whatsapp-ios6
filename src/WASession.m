@@ -17,6 +17,7 @@ NSString *const WASessionMessage = @"WASessionMessage";
 NSString *const WASessionMessageStatus = @"WASessionMessageStatus";
 NSString *const WASessionConversations = @"WASessionConversations";
 NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
+NSString *const WASessionIncomingCall = @"WASessionIncomingCall";
 
 @interface WASession () {
 @public
@@ -26,6 +27,8 @@ NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
     wa_client_config _cfg;
     wa_sess_store *_sessions;   // Signal sessions, touched only on the client thread
     NSThread *_thread;
+    wa_call_state _currentCall;
+    int _hasCurrentCall;
 }
 @property (nonatomic) WASessionState state;
 @property (nonatomic, copy) NSString *qrString;
@@ -156,8 +159,19 @@ static void cb_node(void *ctx, const wa_node *node)
         wa_call_state st;
         if (wa_callengine_on_offer(self->_client, self->_sessions, node, &st)) {
             wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
-            // (an incoming-call UI could be raised here; the offer's call key is now decrypted)
+            self->_currentCall = st;
+            self->_hasCurrentCall = 1;
             WALog(@"incoming call from %s (video=%d, key %s)", st.peer, st.video, st.active ? "ok" : "missing");
+            NSString *peer = [NSString stringWithUTF8String:st.peer];
+            NSString *callId = [NSString stringWithUTF8String:st.call_id];
+            BOOL video = (st.video != 0);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionIncomingCall
+                                                                    object:self
+                                                                  userInfo:@{ @"jid": (peer ?: @""),
+                                                                              @"callId": (callId ?: @""),
+                                                                              @"video": @(video) }];
+            });
         }
         return;
     }
@@ -429,9 +443,38 @@ static void action_place_call(wa_client *c, void *ctx)
     wa_action_ctx *a = (wa_action_ctx *)ctx;
     WASession *self = (__bridge WASession *)a->session;
     wa_call_state st;
-    if (wa_callengine_place(c, self->_sessions, a->jid, a->video, &st) == 0)
+    if (wa_callengine_place(c, self->_sessions, a->jid, a->video, &st) == 0) {
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+        self->_currentCall = st;
+        self->_hasCurrentCall = 1;
+    }
     free(a);
+}
+
+static void action_accept_call(wa_client *c, void *ctx)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    if (self->_hasCurrentCall) {
+        wa_callengine_accept(c, &self->_currentCall);
+    }
+}
+
+static void action_reject_call(wa_client *c, void *ctx)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    if (self->_hasCurrentCall) {
+        wa_callengine_reject(c, &self->_currentCall);
+        self->_hasCurrentCall = 0;
+    }
+}
+
+static void action_terminate_call(wa_client *c, void *ctx)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    if (self->_hasCurrentCall) {
+        wa_callengine_terminate(c, &self->_currentCall, "hangup");
+        self->_hasCurrentCall = 0;
+    }
 }
 
 - (void)sendText:(NSString *)text toJID:(NSString *)jid
@@ -467,6 +510,24 @@ static void action_place_call(wa_client *c, void *ctx)
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
     a->video = video ? 1 : 0;
     if (wa_client_post(_client, action_place_call, a) != 0) free(a);
+}
+
+- (void)acceptCall
+{
+    if (!_client) return;
+    wa_client_post(_client, action_accept_call, (__bridge void *)self);
+}
+
+- (void)rejectCall
+{
+    if (!_client) return;
+    wa_client_post(_client, action_reject_call, (__bridge void *)self);
+}
+
+- (void)terminateCall
+{
+    if (!_client) return;
+    wa_client_post(_client, action_terminate_call, (__bridge void *)self);
 }
 
 typedef struct {

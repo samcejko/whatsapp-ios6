@@ -1,6 +1,7 @@
 #import "WACallViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
+#import "../WASession.h"
 #import "../WAAudioEngine.h"
 #import <QuartzCore/QuartzCore.h>
 
@@ -152,7 +153,11 @@
     self.statusLabel.text = [NSString stringWithFormat:@"%d:%02d", secs / 60, secs % 60];
 }
 
-- (void)accept { self.incoming = NO; [self.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)]; [self.buttons removeAllObjects];
+- (void)accept {
+    [[WASession shared] acceptCall];
+    self.incoming = NO;
+    [self.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)];
+    [self.buttons removeAllObjects];
     [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
     [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
     [self addButton:WALoc(@"call_speaker") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"◉" action:@selector(toggleSpeaker)];
@@ -166,6 +171,11 @@
 
 - (void)hangup
 {
+    if (self.incoming && !self.connected) {
+        [[WASession shared] rejectCall];
+    } else {
+        [[WASession shared] terminateCall];
+    }
     [self.timer invalidate];
     self.timer = nil;
     [self.audio stop];

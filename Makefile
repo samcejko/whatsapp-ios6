@@ -33,7 +33,7 @@ Wazzup_FILES := $(wildcard src/*.m) $(wildcard src/*/*.m) \
                    $(OPUS_SRC) \
                    $(wildcard vendor/qrcodegen/*.c)
 
-Wazzup_FRAMEWORKS := UIKit Foundation CoreGraphics QuartzCore CoreText Security ImageIO CoreMedia CoreVideo OpenGLES AudioToolbox AVFoundation MediaPlayer
+Wazzup_FRAMEWORKS := UIKit Foundation CoreGraphics QuartzCore CoreText Security ImageIO CoreMedia CoreVideo OpenGLES AudioToolbox AVFoundation MediaPlayer AddressBook AddressBookUI
 
 Wazzup_CFLAGS := -Isrc -Icore -Icore/rtc \
                     -Ivendor -Ivendor/monocypher -Ivendor/mbedtls/include -Ivendor/mbedtls/library \

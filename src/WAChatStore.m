@@ -84,7 +84,8 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
     if (!e && create) {
         e = [NSMutableDictionary dictionary];
         e[@"jid"] = jid ?: @"";
-        e[@"name"] = @"";
+        NSString *ab = WAAddressBookNameForNumber(key);
+        e[@"name"] = ab.length ? ab : @"";
         e[@"ts"] = @0;
         e[@"unread"] = @0;
         e[@"msgs"] = [NSMutableArray array];
@@ -227,6 +228,29 @@ static NSString *msgSig(NSDictionary *m)
     [self appendText:(text ?: @"") toJID:jid outgoing:YES ts:(unsigned long long)[[NSDate date] timeIntervalSince1970] msgId:mid status:status];
 }
 
+- (void)recordOutgoingMedia:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid status:(WAMessageStatus)status
+{
+    if (!jid.length) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    if (![e[@"name"] length]) {
+        NSString *ab = WAAddressBookNameForNumber([self keyFor:jid]);
+        e[@"name"] = ab.length ? ab : ([jid componentsSeparatedByString:@"@"].firstObject ?: jid);
+    }
+    unsigned long long ts = (unsigned long long)[[NSDate date] timeIntervalSince1970];
+    NSMutableDictionary *m = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                              (caption ?: @""), @"text",
+                              @YES, @"out",
+                              @(ts), @"ts",
+                              (mid ?: @""), @"id",
+                              @(WA_MSG_IMAGE), @"kind",
+                              @(status), @"status", nil];
+    if (thumbData.length) m[@"thumb"] = thumbData;
+    [self mergeMessages:@[ m ] into:e];
+    if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+}
+
 - (void)appendText:(NSString *)text toJID:(NSString *)jid outgoing:(BOOL)out ts:(unsigned long long)ts msgId:(NSString *)mid status:(WAMessageStatus)status
 {
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
@@ -283,8 +307,13 @@ static NSString *msgSig(NSDictionary *m)
         NSDictionary *e = self.chats[k];
         NSDictionary *lastMsg = [e[@"msgs"] lastObject];
         NSString *last = lastMsg ? [WAChatStore previewForMessage:lastMsg] : @"";
+        NSString *name = e[@"name"];
+        if (!name.length) {
+            NSString *ab = WAAddressBookNameForNumber(k);
+            if (ab.length) name = ab;
+        }
         [rows addObject:@{ @"jid": e[@"jid"] ?: @"",
-                           @"name": e[@"name"] ?: @"",
+                           @"name": name ?: @"",
                            @"last": last,
                            @"ts": e[@"ts"] ?: @0,
                            @"unread": e[@"unread"] ?: @0 }];

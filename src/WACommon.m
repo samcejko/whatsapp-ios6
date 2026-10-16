@@ -1,4 +1,5 @@
 #import "WACommon.h"
+#import <AddressBook/AddressBook.h>
 #include "wa_util.h"
 
 void WALog(NSString *fmt, ...)
@@ -63,6 +64,70 @@ NSString *WADayLabel(uint64_t ts)
     if (diff < 2 * 86400 && dc.day != dn.day) return WALoc(@"yesterday");
     if (diff < 7 * 86400) return [wday stringFromDate:date];
     return [dmed stringFromDate:date];
+}
+
+NSString *WAAddressBookNameForNumber(NSString *number)
+{
+    if (!number.length) return nil;
+    NSMutableString *digitsOnly = [NSMutableString string];
+    for (NSUInteger i = 0; i < number.length; i++) {
+        unichar c = [number characterAtIndex:i];
+        if (c >= '0' && c <= '9') [digitsOnly appendFormat:@"%C", c];
+    }
+    if (!digitsOnly.length) return nil;
+
+    CFErrorRef err = NULL;
+    ABAddressBookRef ab = NULL;
+    if (&ABAddressBookCreateWithOptions != NULL) {
+        ab = ABAddressBookCreateWithOptions(NULL, &err);
+    }
+    if (!ab) return nil;
+
+    CFArrayRef people = ABAddressBookCopyArrayOfAllPeople(ab);
+    NSString *matchName = nil;
+    if (people) {
+        CFIndex count = CFArrayGetCount(people);
+        for (CFIndex i = 0; i < count; i++) {
+            ABRecordRef person = CFArrayGetValueAtIndex(people, i);
+            ABMultiValueRef phones = ABRecordCopyValue(person, kABPersonPhoneProperty);
+            if (phones) {
+                CFIndex phoneCount = ABMultiValueGetCount(phones);
+                for (CFIndex p = 0; p < phoneCount; p++) {
+                    CFStringRef phVal = ABMultiValueCopyValueAtIndex(phones, p);
+                    if (phVal) {
+                        NSString *phStr = (__bridge NSString *)phVal;
+                        NSMutableString *candDigits = [NSMutableString string];
+                        for (NSUInteger k = 0; k < phStr.length; k++) {
+                            unichar ch = [phStr characterAtIndex:k];
+                            if (ch >= '0' && ch <= '9') [candDigits appendFormat:@"%C", ch];
+                        }
+                        BOOL match = NO;
+                        if ([candDigits isEqualToString:digitsOnly]) {
+                            match = YES;
+                        } else if (candDigits.length >= 9 && digitsOnly.length >= 9) {
+                            NSString *s1 = [candDigits substringFromIndex:candDigits.length - 9];
+                            NSString *s2 = [digitsOnly substringFromIndex:digitsOnly.length - 9];
+                            if ([s1 isEqualToString:s2]) match = YES;
+                        }
+                        CFRelease(phVal);
+                        if (match) {
+                            CFStringRef fn = ABRecordCopyCompositeName(person);
+                            if (fn) {
+                                matchName = [NSString stringWithString:(__bridge NSString *)fn];
+                                CFRelease(fn);
+                            }
+                            break;
+                        }
+                    }
+                }
+                CFRelease(phones);
+            }
+            if (matchName) break;
+        }
+        CFRelease(people);
+    }
+    CFRelease(ab);
+    return matchName;
 }
 
 // Route the C core's log sink into NSLog (never logs secrets).

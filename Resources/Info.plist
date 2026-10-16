@@ -131,6 +131,8 @@
 	<string>Wazzup uses the microphone for voice and video calls.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Wazzup uses the camera for video calls.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Wazzup uses the photo library to send pictures.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

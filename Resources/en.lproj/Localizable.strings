@@ -56,5 +56,9 @@
 "download_failed" = "Failed to download file";
 "online" = "online";
 "last_seen" = "last seen";
+"choose_photo" = "Choose Photo";
+"choose_contact" = "Choose from Address Book";
+"enter_number" = "Enter Phone Number";
+"sending" = "Sending\U2026";
 
 
