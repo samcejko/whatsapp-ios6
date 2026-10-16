@@ -23,6 +23,7 @@
 #include "wa_mlow_noise.h"
 #include "wa_mlow_postfilter.h"
 #include "wa_mlow_celp.h"
+#include "wa_mlow_synth.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -114,6 +115,7 @@ int main(void)
     check("MLow gennoise (float CELP noise gen vs vectors, eps 1e-6)", wa_mlow_noise_selftest() == 0);
     check("MLow postfilters (HP comb + harmonic vs vectors, i16 LSB)", wa_mlow_postfilter_selftest() == 0);
     check("MLow CELP exc_pre (FCB gains + ACB/LTP vs vectors, 2e-5)", wa_mlow_celp_selftest() == 0);
+    check("MLow synth tables (lsf_seed reconstruct + NLSF2A build/sanity)", wa_mlow_synth_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
