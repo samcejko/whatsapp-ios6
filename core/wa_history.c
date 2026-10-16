@@ -373,7 +373,13 @@ static int st_build_wmi(const char *remote, const char *msgid, int text_field, c
         else { wa_buf ext; wa_buf_init(&ext); ok = pb_put_string(&ext, 1, text) == 0 && pb_put_message(&inner, 6, &ext) == 0; wa_buf_free(&ext); }
     }
     if (ok) ok = pb_put_message(&msg, 1, &key) == 0 && pb_put_message(&msg, 2, &inner) == 0 && pb_put_varint(&msg, 3, ts) == 0;
-    if (ok) ok = pb_put_message(out, F_HSM_MESSAGE, &msg) == 0;   // HistorySyncMsg.message
+    // wrap the WebMessageInfo in a HistorySyncMsg{message=1} and append it as its own Conversation.messages(2) entry
+    if (ok) {
+        wa_buf hsm;
+        wa_buf_init(&hsm);
+        ok = pb_put_message(&hsm, F_HSM_MESSAGE, &msg) == 0 && pb_put_message(out, F_CONV_MESSAGES, &hsm) == 0;
+        wa_buf_free(&hsm);
+    }
     wa_buf_free(&key);
     wa_buf_free(&inner);
     wa_buf_free(&msg);
@@ -393,7 +399,12 @@ static int st_build_image_wmi(const char *remote, const char *msgid, const char 
     if (ok) ok = pb_put_string(&img, F_IMG_CAPTION, caption) == 0 && pb_put_bytes(&img, F_JPEG_THUMBNAIL, thumb, thumb_len) == 0;
     if (ok) ok = pb_put_message(&inner, F_MSG_IMAGE, &img) == 0;   // Message.imageMessage = 3
     if (ok) ok = pb_put_message(&msg, 1, &key) == 0 && pb_put_message(&msg, 2, &inner) == 0 && pb_put_varint(&msg, 3, ts) == 0;
-    if (ok) ok = pb_put_message(out, F_HSM_MESSAGE, &msg) == 0;
+    if (ok) {
+        wa_buf hsm;
+        wa_buf_init(&hsm);
+        ok = pb_put_message(&hsm, F_HSM_MESSAGE, &msg) == 0 && pb_put_message(out, F_CONV_MESSAGES, &hsm) == 0;
+        wa_buf_free(&hsm);
+    }
     wa_buf_free(&key);
     wa_buf_free(&img);
     wa_buf_free(&inner);
@@ -401,15 +412,16 @@ static int st_build_image_wmi(const char *remote, const char *msgid, const char 
     return ok ? 0 : -1;
 }
 
-// Build a Conversation { id, (name|displayName), conversationTimestamp, messages[hsm] }. Appends to out as field 2.
-static int st_build_conv(const char *id, int name_field, const char *name, uint64_t ts, const wa_buf *hsm, wa_buf *out)
+// Build a Conversation { id, (name|displayName), conversationTimestamp, messages... }. `msgsbuf` already holds the
+// framed Conversation.messages(2) entries (from st_build_wmi/st_build_image_wmi), so they are appended raw.
+static int st_build_conv(const char *id, int name_field, const char *name, uint64_t ts, const wa_buf *msgsbuf, wa_buf *out)
 {
     wa_buf conv;
     wa_buf_init(&conv);
     int ok = pb_put_string(&conv, F_CONV_ID, id) == 0 &&
              pb_put_string(&conv, name_field, name) == 0 &&
              pb_put_varint(&conv, F_CONV_TIMESTAMP, ts) == 0 &&
-             pb_put_message(&conv, F_CONV_MESSAGES, hsm) == 0;
+             wa_buf_append(&conv, msgsbuf->data, msgsbuf->len) == 0;
     if (ok) ok = pb_put_message(out, F_HS_CONVERSATIONS, &conv) == 0;
     wa_buf_free(&conv);
     return ok ? 0 : -1;
