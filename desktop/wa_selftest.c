@@ -22,6 +22,7 @@
 #include "wa_mlow_cc.h"
 #include "wa_mlow_noise.h"
 #include "wa_mlow_postfilter.h"
+#include "wa_mlow_celp.h"
 
 static int g_fail;
 static void check(const char *name, int ok)
@@ -112,6 +113,7 @@ int main(void)
     check("MLow pitch decode (LTP gains + lag/contour heap chase vs vectors)", wa_mlow_pitch_selftest() == 0);
     check("MLow gennoise (float CELP noise gen vs vectors, eps 1e-6)", wa_mlow_noise_selftest() == 0);
     check("MLow postfilters (HP comb + harmonic vs vectors, i16 LSB)", wa_mlow_postfilter_selftest() == 0);
+    check("MLow CELP exc_pre (FCB gains + ACB/LTP vs vectors, 2e-5)", wa_mlow_celp_selftest() == 0);
     printf(g_fail ? "\nFAILED\n" : "\nALL PASS\n");
     return g_fail;
 }
