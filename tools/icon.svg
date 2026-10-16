@@ -1,28 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Wazzup app icon: a glossy green iOS 6 tile with a white speech bubble holding a classic telephone handset.
-     Deliberately not WhatsApp's own mark (different bubble shape, handset style, iOS 6 gloss). -->
+<!-- Wazzup app icon: two-tone (green + white), flat glyph, fine iOS 6 "Messages" pinstripes and the iconic curved top gloss.
+     Not WhatsApp's own mark (different bubble/tail shape). -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3ddc84"/>
-      <stop offset="0.5" stop-color="#17b85b"/>
-      <stop offset="1" stop-color="#0a8f45"/>
+      <stop offset="0" stop-color="#3fd06a"/>
+      <stop offset="1" stop-color="#14a043"/>
     </linearGradient>
     <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.18"/>
     </linearGradient>
+    <pattern id="stripes" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="4" fill="#000000" fill-opacity="0.045"/>
+    </pattern>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <g transform="translate(512 470) rotate(-32) scale(0.95)" fill="#000">
+        <path d="M-150 -70 c-30 0 -46 20 -40 54 c24 150 150 276 300 300 c34 6 54 -10 54 -40 l0 -74 c0 -22 -14 -36 -34 -40 l-78 -16 c-18 -4 -34 2 -44 18 l-18 28 c-60 -32 -108 -80 -140 -140 l28 -18 c16 -10 22 -26 18 -44 l-16 -78 c-4 -20 -18 -34 -40 -34 z"/>
+      </g>
+    </mask>
   </defs>
-  <rect x="0" y="0" width="1024" height="1024" fill="url(#tile)"/>
-  <!-- speech bubble (rounded square + tail), white -->
-  <path d="M250 230 h524 a70 70 0 0 1 70 70 v360 a70 70 0 0 1 -70 70 h-300 l-150 120 v-120 h-74 a70 70 0 0 1 -70 -70 v-360 a70 70 0 0 1 70 -70 z"
-        fill="#ffffff"/>
-  <!-- classic telephone handset, green -->
-  <g transform="translate(512 500) rotate(-32)" fill="#0a8f45">
-    <path d="M-150 -70 c-30 0 -46 20 -40 54 c24 150 150 276 300 300 c34 6 54 -10 54 -40 l0 -74 c0 -22 -14 -36 -34 -40 l-78 -16 c-18 -4 -34 2 -44 18 l-18 28 c-60 -32 -108 -80 -140 -140 l28 -18 c16 -10 22 -26 18 -44 l-16 -78 c-4 -20 -18 -34 -40 -34 z"/>
+  <rect width="1024" height="1024" fill="url(#tile)"/>
+  <rect width="1024" height="1024" fill="url(#stripes)"/>
+  <!-- flat white bubble with handset cut out (two-tone) -->
+  <g mask="url(#cut)">
+    <circle cx="512" cy="470" r="300" fill="#ffffff"/>
+    <path d="M300 640 L215 830 L440 735 z" fill="#ffffff"/>
   </g>
-  <!-- iOS 6 top gloss -->
-  <path d="M0 0 h1024 v300 c-200 120 -824 120 -1024 0 z" fill="url(#gloss)"/>
+  <!-- iconic iOS 6 top gloss -->
+  <path d="M0 0 h1024 v470 c-260 110 -764 110 -1024 0 z" fill="url(#gloss)"/>
+  <rect x="2" y="2" width="1020" height="1020" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="4"/>
 </svg>
