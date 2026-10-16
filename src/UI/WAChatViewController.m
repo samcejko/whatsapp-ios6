@@ -70,22 +70,22 @@
     [super viewDidLoad];
     self.view.backgroundColor = [[UIColor alloc] initWithPatternImage:[WATheme wallpaper]];
 
-    // Nav Bar Buttons: Search, Video Call, Voice Call
-    UIButton *call = [UIButton buttonWithType:UIButtonTypeCustom];
-    [call setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 type:WACallButtonTypeVoice] forState:UIControlStateNormal];
-    call.frame = CGRectMake(0, 0, 30, 30);
-    [call addTarget:self action:@selector(voiceCall) forControlEvents:UIControlEventTouchUpInside];
+    // Nav Bar Buttons: Search, Video Call, Voice Call (all sharing the same UIBarButtonItemStyleBordered design)
+    UIImage *videoImg = [WATheme videoCallIconWithColor:[UIColor whiteColor] size:CGSizeMake(20, 20)];
+    UIBarButtonItem *videoItem = [[UIBarButtonItem alloc] initWithImage:videoImg
+                                                                  style:UIBarButtonItemStyleBordered
+                                                                 target:self
+                                                                 action:@selector(videoCall)];
 
-    UIButton *video = [UIButton buttonWithType:UIButtonTypeCustom];
-    [video setImage:[WATheme roundCallButton:[WATheme accent] diameter:30 type:WACallButtonTypeVideo] forState:UIControlStateNormal];
-    video.frame = CGRectMake(0, 0, 30, 30);
-    [video addTarget:self action:@selector(videoCall) forControlEvents:UIControlEventTouchUpInside];
+    UIImage *callImg = [WATheme callIconWithColor:[UIColor whiteColor] size:CGSizeMake(20, 20)];
+    UIBarButtonItem *callItem = [[UIBarButtonItem alloc] initWithImage:callImg
+                                                                 style:UIBarButtonItemStyleBordered
+                                                                target:self
+                                                                action:@selector(voiceCall)];
 
     UIBarButtonItem *searchItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSearch target:self action:@selector(toggleSearch)];
 
-    self.navigationItem.rightBarButtonItems = @[ [[UIBarButtonItem alloc] initWithCustomView:video],
-                                                 [[UIBarButtonItem alloc] initWithCustomView:call],
-                                                 searchItem ];
+    self.navigationItem.rightBarButtonItems = @[ videoItem, callItem, searchItem ];
 
     // Title View: Contact Name + Ephemeral indicator + Presence / Recording status
     UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 180, 44)];
