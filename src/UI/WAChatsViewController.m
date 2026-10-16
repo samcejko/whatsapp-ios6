@@ -234,6 +234,15 @@
     return cell;
 }
 
+- (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip { return YES; }
+
+- (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)ip
+{
+    if (style != UITableViewCellEditingStyleDelete) return;
+    NSString *jid = [self rows][ip.row][@"jid"];
+    [[WAChatStore shared] deleteChat:jid];   // this posts WAChatStoreChanged -> reloadFromStore refreshes the table
+}
+
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip
 {
     [t deselectRowAtIndexPath:ip animated:YES];

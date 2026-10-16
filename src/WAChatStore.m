@@ -187,6 +187,15 @@ static NSString *msgSig(NSDictionary *m)
     return [self mediaLabelForKind:[m[@"kind"] intValue]];
 }
 
+- (void)deleteChat:(NSString *)jid
+{
+    NSString *key = [self keyFor:jid];
+    if (!self.chats[key]) return;
+    [self.chats removeObjectForKey:key];
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+}
+
 - (NSArray *)conversationsSorted
 {
     NSMutableArray *rows = [NSMutableArray arrayWithCapacity:self.chats.count];
