@@ -5,6 +5,10 @@
 #import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
 
+@interface WASettingsViewController ()
+@property (nonatomic, strong) UILabel *statusSub;
+@end
+
 @implementation WASettingsViewController {
     UITableView *_table;
 }
@@ -41,15 +45,28 @@
     nl.text = num.length ? [@"+" stringByAppendingString:num] : WALoc(@"profile");
     nl.backgroundColor = [UIColor clearColor];
     [hdr addSubview:nl];
-    UILabel *sub = [[UILabel alloc] initWithFrame:CGRectMake(96, 64, w - 110, 20)];
-    sub.font = [UIFont systemFontOfSize:14];
-    sub.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    sub.text = WALoc(@"status_connected");
-    sub.backgroundColor = [UIColor clearColor];
-    [hdr addSubview:sub];
+    self.statusSub = [[UILabel alloc] initWithFrame:CGRectMake(96, 64, w - 110, 20)];
+    self.statusSub.font = [UIFont systemFontOfSize:14];
+    self.statusSub.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.statusSub.backgroundColor = [UIColor clearColor];
+    [hdr addSubview:self.statusSub];
     _table.tableHeaderView = hdr;
 
     [self.view addSubview:_table];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateStatusText) name:WASessionStateChanged object:nil];
+    [self updateStatusText];
+}
+
+- (void)updateStatusText
+{
+    WASessionState s = [WASession shared].state;
+    NSString *t = WALoc(@"status_offline");
+    if (s == WASessionStateConnecting) t = WALoc(@"status_connecting");
+    else if (s == WASessionStateHandshaking) t = WALoc(@"status_handshaking");
+    else if (s == WASessionStateConnected) t = WALoc(@"status_connected");
+    else if (s == WASessionStatePairing) t = WALoc(@"status_pairing");
+    self.statusSub.text = t;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 1; }
@@ -87,6 +104,11 @@
         WAAppDelegate *ad = (WAAppDelegate *)[UIApplication sharedApplication].delegate;
         [ad showPairing];
     }
+}
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end
