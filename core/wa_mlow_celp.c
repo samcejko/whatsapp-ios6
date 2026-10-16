@@ -139,6 +139,16 @@ static void celp_decode(float *acb_state, int acb_state_len, int voiced, int32_t
     memcpy(&acb_state[acb_state_len - 2 * subfrlen], lpc_res, (size_t)subfrlen * sizeof(float));
 }
 
+const float *wa_mlow_fcb_gains_v(void) { fcb_gains(); return g_fcb_v; }
+const float *wa_mlow_fcb_gains_uv(void) { fcb_gains(); return g_fcb_uv; }
+
+void wa_mlow_celp_decode_subframe(float *acb_state, int acb_state_len, int voiced, int32_t acb_gain_idx,
+                                  const float *lags, int num_lags, int subfrlen, int low_rate, float norm_br,
+                                  float *lpc_res)
+{
+    celp_decode(acb_state, acb_state_len, voiced, acb_gain_idx, lags, num_lags, subfrlen, low_rate, norm_br, lpc_res);
+}
+
 void wa_mlow_celp_init(wa_mlow_celp_state *st) { memset(st, 0, sizeof(*st)); }
 
 void wa_mlow_celp_exc_pre(wa_mlow_celp_state *st, const int32_t *pulses, const wa_mlow_celp_params *params,

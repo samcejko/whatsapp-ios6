@@ -39,6 +39,16 @@ void wa_mlow_celp_init(wa_mlow_celp_state *st);
 void wa_mlow_celp_exc_pre(wa_mlow_celp_state *st, const int32_t *pulses, const wa_mlow_celp_params *params,
                           int low_rate, float *exc);
 
+// --- shared with the SynthFrame integrator (wa_mlow_decoder.c) ---
+// FCB gain tables (built on first call): v = voiced (34 entries), uv = unvoiced (91 entries).
+const float *wa_mlow_fcb_gains_v(void);
+const float *wa_mlow_fcb_gains_uv(void);
+// One subframe of the CELP decode: add voiced ACB/LTP into lpc_res, then push it into acb_state. num_lags =
+// subfrlen/40. norm_br = packet normalized bitrate. Mirrors celpdec.go celpDecode.
+void wa_mlow_celp_decode_subframe(float *acb_state, int acb_state_len, int voiced, int32_t acb_gain_idx,
+                                  const float *lags, int num_lags, int subfrlen, int low_rate, float norm_br,
+                                  float *lpc_res);
+
 int wa_mlow_celp_selftest(void);
 
 #ifdef __cplusplus
