@@ -130,7 +130,7 @@
     } else if ([st isEqualToString:@"unavailable"]) {
         NSString *last = n.userInfo[@"last"];
         if (last.length) {
-            self.subtitleLabel.text = [NSString stringWithFormat:@"%@ %@", WALoc(@"last_seen"), WAClockTime([last unsignedLongLongValue])];
+            self.subtitleLabel.text = [NSString stringWithFormat:@"%@ %@", WALoc(@"last_seen"), WAClockTime((unsigned long long)[last longLongValue])];
         } else {
             self.subtitleLabel.text = @"";
         }
