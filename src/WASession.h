@@ -44,4 +44,7 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 // Send typing indicator (composing = YES) or idle (composing = NO)
 - (void)sendChatState:(BOOL)composing toJID:(NSString *)jid;
 
+// Request contact's profile picture preview
+- (void)fetchProfilePicture:(NSString *)jid;
+
 @end

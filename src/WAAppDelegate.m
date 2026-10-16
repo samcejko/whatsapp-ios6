@@ -8,6 +8,7 @@
 #import "UI/WAChatViewController.h"
 #import "UI/WASettingsViewController.h"
 #import "UI/WAMediaViewController.h"
+#import "UI/WACallViewController.h"
 #import "WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
 #include "wa_history.h"
@@ -98,6 +99,41 @@
                 break;
             }
         }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"presence"]) {
+        NSString *jid = nil, *state = @"available", *last = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2) {
+                NSString *k = p[0], *v = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+                if ([k isEqualToString:@"jid"]) jid = v;
+                else if ([k isEqualToString:@"state"]) state = v;
+                else if ([k isEqualToString:@"last"]) last = v;
+            }
+        }
+        if (jid.length) {
+            NSMutableDictionary *ui = [NSMutableDictionary dictionaryWithObjectsAndKeys:jid, @"jid", state, @"state", nil];
+            if (last.length) ui[@"last"] = last;
+            [[NSNotificationCenter defaultCenter] postNotificationName:WASessionPresenceChanged object:nil userInfo:ui];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"call"]) {
+        NSString *name = @"Test", *jid = nil;
+        BOOL video = NO, incoming = NO;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2) {
+                NSString *k = p[0], *v = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+                if ([k isEqualToString:@"name"]) name = v;
+                else if ([k isEqualToString:@"jid"]) jid = v;
+                else if ([k isEqualToString:@"video"]) video = [v boolValue];
+                else if ([k isEqualToString:@"incoming"]) incoming = [v boolValue];
+            }
+        }
+        WACallViewController *c = [[WACallViewController alloc] initWithJID:jid name:name video:video incoming:incoming];
+        [self.window.rootViewController presentViewController:c animated:NO completion:nil];
         return YES;
     }
     return NO;

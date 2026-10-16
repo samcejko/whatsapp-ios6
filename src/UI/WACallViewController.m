@@ -5,11 +5,13 @@
 #import <QuartzCore/QuartzCore.h>
 
 @interface WACallViewController ()
+@property (nonatomic, copy) NSString *jid;
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic) BOOL video;
 @property (nonatomic) BOOL incoming;
 @property (nonatomic) BOOL connected;
 @property (nonatomic) BOOL muted;
+@property (nonatomic) BOOL speaker;
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIView *avatar;
@@ -23,7 +25,13 @@
 
 - (instancetype)initWithName:(NSString *)name video:(BOOL)video incoming:(BOOL)incoming
 {
+    return [self initWithJID:nil name:name video:video incoming:incoming];
+}
+
+- (instancetype)initWithJID:(NSString *)jid name:(NSString *)name video:(BOOL)video incoming:(BOOL)incoming
+{
     if ((self = [super init])) {
+        _jid = [jid copy];
         _name = [name copy];
         _video = video;
         _incoming = incoming;
@@ -37,16 +45,12 @@
     [self drawBackground];
 
     self.avatar = [[UIView alloc] init];
-    self.avatar.backgroundColor = [UIColor colorWithWhite:1 alpha:0.15];
     self.avatar.layer.cornerRadius = 55;
+    self.avatar.clipsToBounds = YES;
     [self.view addSubview:self.avatar];
-    UILabel *initial = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 110, 110)];
-    initial.textAlignment = NSTextAlignmentCenter;
-    initial.font = [UIFont systemFontOfSize:48];
-    initial.textColor = [UIColor whiteColor];
-    initial.backgroundColor = [UIColor clearColor];
-    initial.text = self.name.length ? [[self.name substringToIndex:1] uppercaseString] : @"?";
-    [self.avatar addSubview:initial];
+    UIImageView *avImg = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 110, 110)];
+    avImg.image = [WATheme avatarForName:self.name jid:self.jid diameter:110];
+    [self.avatar addSubview:avImg];
 
     self.nameLabel = [[UILabel alloc] init];
     self.nameLabel.textAlignment = NSTextAlignmentCenter;
@@ -72,7 +76,7 @@
     } else {
         [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
         [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
-        [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:@selector(noop)];
+        [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:(self.video ? @selector(noop) : @selector(toggleSpeaker))];
     }
 
     // Outgoing calls "ring" then "connect" (the real transitions come from the call engine's signaling events).
@@ -151,12 +155,13 @@
 - (void)accept { self.incoming = NO; [self.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)]; [self.buttons removeAllObjects];
     [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
     [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
-    [self addButton:WALoc(@"call_speaker") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"◉" action:@selector(noop)];
+    [self addButton:WALoc(@"call_speaker") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"◉" action:@selector(toggleSpeaker)];
     [self viewDidLayoutSubviews];
     [self connect];
 }
 
 - (void)toggleMute { self.muted = !self.muted; self.audio.muted = self.muted; WALog(@"call mute=%d", self.muted); }
+- (void)toggleSpeaker { self.speaker = !self.speaker; self.audio.speaker = self.speaker; WALog(@"call speaker=%d", self.speaker); }
 - (void)noop {}
 
 - (void)hangup

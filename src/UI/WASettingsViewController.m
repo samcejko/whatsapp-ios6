@@ -2,6 +2,7 @@
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
+#import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
 
 @implementation WASettingsViewController {
@@ -21,6 +22,13 @@
 
     // profile header: avatar + own number
     NSString *jid = [WASession shared].ownJID ?: @"";
+    if (jid.length) {
+        NSString *key = [WAChatStore keyForJID:jid];
+        NSString *p = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:p]) {
+            [[WASession shared] fetchProfilePicture:jid];
+        }
+    }
     NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
     NSString *num = [user componentsSeparatedByString:@":"].firstObject;
     CGFloat w = self.view.bounds.size.width;

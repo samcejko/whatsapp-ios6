@@ -19,6 +19,9 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 
 + (instancetype)shared;
 
+// Canonical key for a JID: the digits of the user part
++ (NSString *)keyForJID:(NSString *)jid;
+
 // Chat list rows, newest-first: array of @{ @"jid", @"name", @"last", @"ts", @"unread" }.
 - (NSArray *)conversationsSorted;
 // Messages for a conversation, oldest-first: array of @{ @"text", @"out" (NSNumber BOOL), @"ts" }.

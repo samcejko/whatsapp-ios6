@@ -1,5 +1,6 @@
 #import "WASession.h"
 #import "WACommon.h"
+#import "WAChatStore.h"
 
 #include "wa_store.h"
 #include "wa_client.h"
@@ -241,6 +242,40 @@ static void cb_node(void *ctx, const wa_node *node)
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:WASessionPresenceChanged object:self userInfo:@{ @"jid": f, @"state": state }];
             });
+        }
+    }
+    if (wa_node_tag_is(node, "iq")) {
+        const char *from = wa_node_get(node, "from");
+        const char *type = wa_node_get(node, "type");
+        if (from && from[0] && type && strcmp(type, "result") == 0) {
+            wa_node *pic = wa_node_child(node, "picture");
+            if (pic) {
+                NSString *f = [NSString stringWithUTF8String:from];
+                NSString *key = [WAChatStore keyForJID:f];
+                NSString *path = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+                if (pic->has_content && pic->content_len > 4 && pic->content[0] == 0xFF && pic->content[1] == 0xD8) {
+                    NSData *data = [NSData dataWithBytes:pic->content length:pic->content_len];
+                    [data writeToFile:path atomically:YES];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": key }];
+                    });
+                } else {
+                    const char *url = wa_node_get(pic, "url");
+                    if (!url) url = wa_node_get(pic, "direct_path");
+                    if (url && url[0]) {
+                        NSString *u = [NSString stringWithUTF8String:url];
+                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+                            NSData *data = [NSData dataWithContentsOfURL:[NSURL URLWithString:u]];
+                            if (data.length > 4) {
+                                [data writeToFile:path atomically:YES];
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": key }];
+                                });
+                            }
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -486,6 +521,31 @@ static void action_send_chatstate(wa_client *c, void *ctx)
     snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
     snprintf(p->state, sizeof p->state, "%s", composing ? "composing" : "paused");
     if (wa_client_post(_client, action_send_chatstate, p) != 0) free(p);
+}
+
+static void action_fetch_picture(wa_client *c, void *ctx)
+{
+    wa_presence_ctx *p = (wa_presence_ctx *)ctx;
+    wa_node *iq = wa_node_new("iq");
+    char idbuf[32];
+    snprintf(idbuf, sizeof idbuf, "pic_%08x", (unsigned int)arc4random());
+    wa_node_attr(iq, "id", idbuf);
+    wa_node_attr(iq, "to", p->jid);
+    wa_node_attr(iq, "type", "get");
+    wa_node_attr(iq, "xmlns", "w:profile:picture");
+    wa_node *pic = wa_node_add_new(iq, "picture");
+    wa_node_attr(pic, "type", "preview");
+    wa_client_send(c, iq);
+    wa_node_free(iq);
+    free(p);
+}
+
+- (void)fetchProfilePicture:(NSString *)jid
+{
+    if (!_client || !jid.length) return;
+    wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
+    snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
+    if (wa_client_post(_client, action_fetch_picture, p) != 0) free(p);
 }
 
 - (void)dealloc { if (_sessions) free(_sessions); }

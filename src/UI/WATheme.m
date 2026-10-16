@@ -1,4 +1,6 @@
 #import "WATheme.h"
+#import "../WACommon.h"
+#import "../WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
 
 @implementation WATheme
@@ -102,6 +104,32 @@
 
 + (UIImage *)avatarForName:(NSString *)name jid:(NSString *)jid diameter:(CGFloat)d
 {
+    if (jid.length) {
+        NSString *key = [WAChatStore keyForJID:jid];
+        NSString *p1 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+        UIImage *cached = [UIImage imageWithContentsOfFile:p1];
+        if (!cached) {
+            NSString *p2 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.png", key]];
+            cached = [UIImage imageWithContentsOfFile:p2];
+        }
+        if (cached && cached.size.width > 0 && cached.size.height > 0) {
+            UIGraphicsBeginImageContextWithOptions(CGSizeMake(d, d), NO, 0);
+            CGContextRef ctx = UIGraphicsGetCurrentContext();
+            CGRect rc = CGRectMake(0, 0, d, d);
+            CGContextSaveGState(ctx);
+            CGContextAddEllipseInRect(ctx, rc);
+            CGContextClip(ctx);
+            CGFloat scale = MAX(d / cached.size.width, d / cached.size.height);
+            CGFloat w = cached.size.width * scale;
+            CGFloat h = cached.size.height * scale;
+            [cached drawInRect:CGRectMake((d - w) / 2, (d - h) / 2, w, h)];
+            CGContextRestoreGState(ctx);
+            UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+            UIGraphicsEndImageContext();
+            if (img) return img;
+        }
+    }
+
     // A stable colour per contact, from a hash of the jid.
     static const CGFloat palette[8][3] = {
         { 0.38, 0.49, 0.85 }, { 0.17, 0.63, 0.60 }, { 0.85, 0.44, 0.34 }, { 0.55, 0.45, 0.76 },

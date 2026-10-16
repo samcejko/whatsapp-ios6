@@ -208,6 +208,15 @@ static OSStatus wa_input(void *inRefCon, AudioUnitRenderActionFlags *flags, cons
     return YES;
 }
 
+- (void)setSpeaker:(BOOL)speaker
+{
+    _speaker = speaker;
+    NSError *err = nil;
+    AVAudioSessionPortOverride port = speaker ? AVAudioSessionPortOverrideSpeaker : AVAudioSessionPortOverrideNone;
+    [[AVAudioSession sharedInstance] overrideOutputAudioPort:port error:&err];
+    if (err) WALog(@"audio: setSpeaker error %@", err);
+}
+
 - (void)stop
 {
     if (!_running) return;

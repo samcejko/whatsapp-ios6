@@ -57,6 +57,7 @@
 @property (nonatomic, strong) NSMutableArray *chats;      // all chats, newest-first
 @property (nonatomic, strong) NSMutableArray *filtered;   // search results
 @property (nonatomic, copy) NSString *query;
+@property (nonatomic, strong) NSMutableSet *requestedAvatars;
 @end
 
 @implementation WAChatsViewController
@@ -231,6 +232,20 @@
     cell.timeLbl.text = WAListTime([chat[@"ts"] unsignedLongLongValue]);
     NSInteger unread = [chat[@"unread"] integerValue];
     cell.badge.image = unread > 0 ? [WATheme badgeWithCount:unread] : nil;
+
+    NSString *jid = chat[@"jid"];
+    if (jid.length) {
+        NSString *key = [WAChatStore keyForJID:jid];
+        NSString *p = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:p]) {
+            if (!self.requestedAvatars) self.requestedAvatars = [NSMutableSet set];
+            if (![self.requestedAvatars containsObject:key]) {
+                [self.requestedAvatars addObject:key];
+                [[WASession shared] fetchProfilePicture:jid];
+            }
+        }
+    }
+
     [cell setNeedsLayout];
     return cell;
 }

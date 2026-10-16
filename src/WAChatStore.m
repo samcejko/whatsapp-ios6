@@ -38,12 +38,17 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
 // Canonical key for a JID: the digits of the user part (ignores the :device suffix and server), so a conversation's
 // history id and the bare JID of a live message from the same number land in the same chat. Falls back to the whole
 // string when there are no digits (defensive).
-- (NSString *)keyFor:(NSString *)jid
++ (NSString *)keyForJID:(NSString *)jid
 {
     if (!jid.length) return @"";
     NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
     NSString *digits = [[user componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
     return digits.length ? digits : jid;
+}
+
+- (NSString *)keyFor:(NSString *)jid
+{
+    return [WAChatStore keyForJID:jid];
 }
 
 - (void)load

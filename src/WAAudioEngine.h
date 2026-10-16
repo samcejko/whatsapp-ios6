@@ -9,6 +9,7 @@
 // Called on the audio thread with one encoded Opus frame (20 ms, 16 kHz) captured from the mic.
 @property (nonatomic, copy) void (^onFrame)(NSData *opusFrame);
 @property (nonatomic) BOOL muted;
+@property (nonatomic) BOOL speaker;
 
 - (BOOL)start;
 - (void)stop;

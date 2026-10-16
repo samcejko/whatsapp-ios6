@@ -104,6 +104,11 @@
     [nc addObserver:self selector:@selector(onPresence:) name:WASessionPresenceChanged object:nil];
 
     [[WASession shared] subscribePresence:self.jid];
+    NSString *key = [WAChatStore keyForJID:self.jid];
+    NSString *avatarPath = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:avatarPath]) {
+        [[WASession shared] fetchProfilePicture:self.jid];
+    }
 
     [self loadMessages];
     [self.table reloadData];
@@ -302,7 +307,7 @@ static NSString *durationStr(unsigned int secs)
 - (void)voiceCall
 {
     [[WASession shared] placeCallTo:self.jid video:NO];
-    WACallViewController *c = [[WACallViewController alloc] initWithName:self.title video:NO incoming:NO];
+    WACallViewController *c = [[WACallViewController alloc] initWithJID:self.jid name:self.title video:NO incoming:NO];
     c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     [self presentViewController:c animated:YES completion:nil];
 }
@@ -310,7 +315,7 @@ static NSString *durationStr(unsigned int secs)
 - (void)videoCall
 {
     [[WASession shared] placeCallTo:self.jid video:YES];
-    WACallViewController *c = [[WACallViewController alloc] initWithName:self.title video:YES incoming:NO];
+    WACallViewController *c = [[WACallViewController alloc] initWithJID:self.jid name:self.title video:YES incoming:NO];
     c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     [self presentViewController:c animated:YES completion:nil];
 }
