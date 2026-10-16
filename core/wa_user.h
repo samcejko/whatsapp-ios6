@@ -17,6 +17,7 @@ extern "C" {
 typedef struct {
     char jids[WA_MAX_DEVICES][80];   // full device JIDs ("user:dev@server")
     int ndevices;
+    char lid[80];                     // resolved user LID if returned by usync ("<digits>@lid")
 } wa_device_list;
 
 // Build the usync device-list IQ for one or more bare user JIDs ("<num>@s.whatsapp.net"). sid is a random id the

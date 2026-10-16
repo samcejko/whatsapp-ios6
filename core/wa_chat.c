@@ -81,20 +81,58 @@ int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char 
 
     // devices of the recipient, and our own other devices (so our other linked devices see the message too)
     wa_device_list recip, mine;
+    memset(&recip, 0, sizeof recip);
+    memset(&mine, 0, sizeof mine);
     if (resolve_devices(c, to_user_jid, &recip) != 0) return -1;
-    wa_jid me;
-    int have_me = wa_jid_parse(wa_client_device(c)->pn, &me) == 0;
+
+    // Modern WhatsApp requires addressing via LID if available
+    const char *dest_user = to_user_jid;
+    const char *peer_recipient_pn = NULL;
+    char recip_lid_user[80];
+    if (recip.lid[0] && strstr(to_user_jid, "@s.whatsapp.net")) {
+        dest_user = recip.lid;
+        peer_recipient_pn = to_user_jid;
+        wa_jid rlj;
+        if (wa_jid_parse(recip.lid, &rlj) == 0) {
+            snprintf(recip_lid_user, sizeof recip_lid_user, "%s", rlj.user);
+            for (int i = 0; i < recip.ndevices; i++) {
+                wa_jid dj;
+                if (wa_jid_parse(recip.jids[i], &dj) == 0) {
+                    wa_jid_format(recip.jids[i], sizeof recip.jids[0], recip_lid_user, dj.device, "lid");
+                }
+            }
+        }
+    }
+
+    wa_device *d = wa_client_device(c);
+    wa_jid me_pn, me_lid;
+    int have_me_pn = wa_jid_parse(d->pn, &me_pn) == 0;
+    int have_me_lid = wa_jid_parse(d->lid, &me_lid) == 0;
+    int my_dev_id = have_me_lid ? me_lid.device : (have_me_pn ? me_pn.device : 0);
+
     char my_user[80];
-    if (have_me) { snprintf(my_user, sizeof my_user, "%s@%s", me.user, me.server); if (resolve_devices(c, my_user, &mine) != 0) mine.ndevices = 0; }
-    else mine.ndevices = 0;
+    if (have_me_lid) {
+        snprintf(my_user, sizeof my_user, "%s@%s", me_lid.user, me_lid.server);
+        if (resolve_devices(c, my_user, &mine) != 0) mine.ndevices = 0;
+    } else if (have_me_pn) {
+        snprintf(my_user, sizeof my_user, "%s@%s", me_pn.user, me_pn.server);
+        if (resolve_devices(c, my_user, &mine) != 0) mine.ndevices = 0;
+    }
 
     wa_sig_keypair id;
     our_identity(c, &id);
 
-    // encrypt the Message plaintext once per device
-    wa_buf plaintext;
-    wa_buf_init(&plaintext);
-    if (wa_msg_text_plaintext(text, &plaintext) != 0) { wa_buf_free(&plaintext); return -1; }
+    // Prepare plaintexts: recipient receives raw Message (field 1: conversation),
+    // own companion/phone devices receive DeviceSentMessage (field 31)
+    wa_buf pt_recip, pt_mine;
+    wa_buf_init(&pt_recip);
+    wa_buf_init(&pt_mine);
+    if (wa_msg_text_plaintext(text, &pt_recip) != 0) { wa_buf_free(&pt_recip); return -1; }
+    if (wa_msg_dsm_plaintext(dest_user, pt_recip.data, pt_recip.len, &pt_mine) != 0) {
+        wa_buf_free(&pt_recip);
+        wa_buf_free(&pt_mine);
+        return -1;
+    }
 
     wa_msg_devenc devs[WA_MAX_DEVICES * 2];
     wa_buf encbufs[WA_MAX_DEVICES * 2];
@@ -103,17 +141,22 @@ int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char 
 
     wa_device_list *lists[2] = { &recip, &mine };
     for (int li = 0; li < 2; li++) {
+        const uint8_t *plain = (li == 0) ? pt_recip.data : pt_mine.data;
+        size_t plain_len = (li == 0) ? pt_recip.len : pt_mine.len;
+
         for (int i = 0; i < lists[li]->ndevices && ndevs < (int)(sizeof devs / sizeof devs[0]); i++) {
             const char *djid = lists[li]->jids[i];
-            if (have_me && wa_jid_same_user(djid, wa_client_device(c)->pn)) {
-                wa_jid dj;
-                if (wa_jid_parse(djid, &dj) == 0 && dj.device == me.device) continue;   // skip ourselves
+            wa_jid dj;
+            if (wa_jid_parse(djid, &dj) == 0) {
+                int is_own_user = (have_me_pn && strcmp(dj.user, me_pn.user) == 0) ||
+                                  (have_me_lid && strcmp(dj.user, me_lid.user) == 0);
+                if (is_own_user && dj.device == my_dev_id) continue;   // skip ourselves
             }
             if (ensure_session(c, sessions, djid) != 0) continue;
             wa_sig_session *s = wa_sess_get(sessions, djid);
             wa_buf_init(&encbufs[ndevs]);
             int is_prekey = 0;
-            if (wa_msg_encrypt(s, &id, plaintext.data, plaintext.len, &is_prekey, &encbufs[ndevs]) != 0) { wa_buf_free(&encbufs[ndevs]); continue; }
+            if (wa_msg_encrypt(s, &id, plain, plain_len, &is_prekey, &encbufs[ndevs]) != 0) { wa_buf_free(&encbufs[ndevs]); continue; }
             snprintf(typestr[ndevs], 8, "%s", is_prekey ? "pkmsg" : "msg");
             devs[ndevs].jid = djid;
             devs[ndevs].enc = encbufs[ndevs].data;
@@ -124,7 +167,8 @@ int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char 
             ndevs++;
         }
     }
-    wa_buf_free(&plaintext);
+    wa_buf_free(&pt_recip);
+    wa_buf_free(&pt_mine);
 
     int rc = -1;
     if (reached_recipient) {
@@ -132,9 +176,9 @@ int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char 
         if (msg_id && msg_id[0]) snprintf(id_str, sizeof id_str, "%s", msg_id);
         else wa_client_next_id(c, id_str, sizeof id_str);
         if (out_msg_id && out_msg_id_cap) snprintf(out_msg_id, out_msg_id_cap, "%s", id_str);
-        wa_device *d = wa_client_device(c);
-        wa_node *msg = wa_msg_build_dm(to_user_jid, id_str, devs, ndevs,
-                                       any_pkmsg ? d->account : NULL, any_pkmsg ? d->account_len : 0);
+        wa_node *msg = wa_msg_build_dm(dest_user, id_str, devs, ndevs,
+                                       any_pkmsg ? d->account : NULL, any_pkmsg ? d->account_len : 0,
+                                       peer_recipient_pn);
         rc = wa_client_send(c, msg);
         wa_node_free(msg);
     }

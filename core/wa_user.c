@@ -21,6 +21,7 @@ wa_node *wa_user_build_devices_iq(const char *const *user_jids, int n, const cha
     wa_node_attr(usync, "context", "message");
     wa_node *query = wa_node_add_new(usync, "query");
     wa_node_attr(wa_node_add_new(query, "devices"), "version", "2");
+    wa_node_add_new(query, "lid");
     wa_node *list = wa_node_add_new(usync, "list");
     for (int i = 0; i < n; i++) {
         wa_node *u = wa_node_add_new(list, "user");
@@ -42,6 +43,18 @@ int wa_user_parse_devices(const wa_node *iq_result, wa_device_list *out)
         if (!ujid) continue;
         wa_jid uj;
         if (wa_jid_parse(ujid, &uj) != 0) continue;
+
+        // Parse <lid val="..."/> if present
+        const wa_node *lid_node = wa_node_find(user, "lid");
+        if (lid_node) {
+            const char *lval = wa_node_get(lid_node, "val");
+            if (!lval) lval = wa_node_get(lid_node, "jid");
+            if (lval && lval[0]) {
+                if (strchr(lval, '@')) snprintf(out->lid, sizeof out->lid, "%s", lval);
+                else snprintf(out->lid, sizeof out->lid, "%s@lid", lval);
+            }
+        }
+
         const wa_node *devlist = wa_node_find(user, "device-list");
         if (!devlist) continue;
         for (int k = 0; k < devlist->nchildren && out->ndevices < WA_MAX_DEVICES; k++) {
@@ -49,6 +62,7 @@ int wa_user_parse_devices(const wa_node *iq_result, wa_device_list *out)
             if (!wa_node_tag_is(dev, "device")) continue;
             int id = (int)wa_node_get_int(dev, "id", -1);
             if (id < 0) continue;
+            if (id > 0 && !wa_node_get(dev, "key-index")) continue;
             wa_jid_format(out->jids[out->ndevices], sizeof out->jids[0], uj.user, id, uj.server);
             out->ndevices++;
         }
@@ -165,11 +179,18 @@ int wa_user_selftest(void)
     wa_node *list = wa_node_add_new(usync, "list");
     wa_node *user = wa_node_add_new(list, "user");
     wa_node_attr(user, "jid", "420777123456@s.whatsapp.net");
+    wa_node *lid_node = wa_node_add_new(user, "lid");
+    wa_node_attr(lid_node, "val", "99887766@lid");
     wa_node *devices = wa_node_add_new(user, "devices");
     wa_node *dl = wa_node_add_new(devices, "device-list");
-    for (int i = 0; i < 3; i++) { wa_node *d = wa_node_add_new(dl, "device"); wa_node_attrf(d, "id", "%d", i); }
+    for (int i = 0; i < 3; i++) {
+        wa_node *d = wa_node_add_new(dl, "device");
+        wa_node_attrf(d, "id", "%d", i);
+        if (i > 0) wa_node_attr(d, "key-index", "1");
+    }
     wa_device_list dlist;
     int ok = wa_user_parse_devices(iq, &dlist) == 0 && dlist.ndevices == 3 &&
+             strcmp(dlist.lid, "99887766@lid") == 0 &&
              strcmp(dlist.jids[0], "420777123456@s.whatsapp.net") == 0 &&
              strcmp(dlist.jids[1], "420777123456:1@s.whatsapp.net") == 0;
     wa_node_free(iq);

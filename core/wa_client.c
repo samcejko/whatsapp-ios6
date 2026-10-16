@@ -139,6 +139,11 @@ static int ws_send_noise(wa_client *c, const uint8_t *data, size_t len, int firs
 int wa_client_send(wa_client *c, const wa_node *node)
 {
     if (c->state < WA_HANDSHAKING || !c->ws) return -1;
+    {
+        char *dbg = wa_node_to_string(node, 0);
+        wa_log("-> %s", dbg ? dbg : node->tag);
+        free(dbg);
+    }
     wa_buf plain, enc, frame;
     wa_buf_init(&plain);
     wa_buf_init(&enc);
@@ -394,6 +399,25 @@ static void send_recv_ack(wa_client *c, const wa_node *node, const char *cls)
     wa_node_free(ack);
 }
 
+static void sync_app_state(wa_client *c)
+{
+    const char *colls[] = { "critical_block", "critical_unblock_low", "regular_high", "regular_low", "regular" };
+    for (int i = 0; i < 5; i++) {
+        wa_node *iq = wa_node_new("iq");
+        wa_node_attr(iq, "to", "@s.whatsapp.net");
+        wa_node_attr(iq, "type", "set");
+        wa_node_attr(iq, "xmlns", "w:sync:app:state");
+        wa_node *sync = wa_node_add_new(iq, "sync");
+        wa_node *col = wa_node_add_new(sync, "collection");
+        wa_node_attr(col, "name", colls[i]);
+        wa_node_attr(col, "return_snapshot", "true");
+        wa_node_attr(col, "version", "0");
+        wa_client_send_iq(c, iq, NULL, 0);
+        wa_node_free(iq);
+    }
+    wa_log("syncd: sent initial app state sync for 5 collections");
+}
+
 static void handle_notification(wa_client *c, const wa_node *node)
 {
     send_recv_ack(c, node, "notification");
@@ -403,6 +427,18 @@ static void handle_notification(wa_client *c, const wa_node *node)
         wa_node *cnt = wa_node_child(node, "count");
         long n = cnt ? strtol(wa_node_get_or(cnt, "value", "0"), NULL, 10) : 0;
         if (!c->prekeys_sent && n < WA_PREKEY_MIN) upload_prekeys(c);
+    } else if (type && strcmp(type, "account_sync") == 0) {
+        const char *ts = wa_node_get(node, "timestamp");
+        wa_node *clean_iq = wa_node_new("iq");
+        wa_node_attr(clean_iq, "to", "@s.whatsapp.net");
+        wa_node_attr(clean_iq, "type", "set");
+        wa_node_attr(clean_iq, "xmlns", "urn:xmpp:whatsapp:dirty");
+        wa_node *clean = wa_node_add_new(clean_iq, "clean");
+        wa_node_attr(clean, "type", "account_sync");
+        if (ts) wa_node_attr(clean, "timestamp", ts);
+        wa_client_send_iq(c, clean_iq, NULL, 0);
+        wa_node_free(clean_iq);
+        wa_log("notification: cleaned account_sync ts=%s", ts ? ts : "");
     }
 }
 
@@ -419,6 +455,24 @@ static void dispatch(wa_client *c, const wa_node *node)
         if (pd) { handle_pair_device(c, node, pd); return; }
         if (ps) { handle_pair_success(c, node, ps); return; }
         if (take_pending_iq(c, node)) return;
+    } else if (wa_node_tag_is(node, "ib")) {
+        for (int i = 0; i < node->nchildren; i++) {
+            wa_node *ch = node->children[i];
+            if (wa_node_tag_is(ch, "dirty")) {
+                const char *dtype = wa_node_get(ch, "type");
+                const char *ts = wa_node_get(ch, "timestamp");
+                wa_node *clean_iq = wa_node_new("iq");
+                wa_node_attr(clean_iq, "to", "@s.whatsapp.net");
+                wa_node_attr(clean_iq, "type", "set");
+                wa_node_attr(clean_iq, "xmlns", "urn:xmpp:whatsapp:dirty");
+                wa_node *clean = wa_node_add_new(clean_iq, "clean");
+                if (dtype) wa_node_attr(clean, "type", dtype);
+                if (ts) wa_node_attr(clean, "timestamp", ts);
+                wa_client_send_iq(c, clean_iq, NULL, 0);
+                wa_node_free(clean_iq);
+                wa_log("dirty: sent clean for type=%s ts=%s", dtype ? dtype : "", ts ? ts : "");
+            }
+        }
     } else if (wa_node_tag_is(node, "success")) {
         c->state = WA_CONNECTED;
         const char *pn = wa_node_get(node, "lid");
@@ -428,6 +482,25 @@ static void dispatch(wa_client *c, const wa_node *node)
         // First login after linking: the server has none of our one-time prekeys, so upload a batch now.
         // (A <notification type="encrypt"> usually follows and would also trigger this; prekeys_sent dedupes.)
         if (!c->prekeys_sent && !c->dev->server_has_prekeys) upload_prekeys(c);
+
+        // Send presence available
+        wa_node *pres = wa_node_new("presence");
+        wa_node_attr(pres, "type", "available");
+        wa_client_send(c, pres);
+        wa_node_free(pres);
+
+        // Fetch application props
+        wa_node *props_iq = wa_node_new("iq");
+        wa_node_attr(props_iq, "to", "@s.whatsapp.net");
+        wa_node_attr(props_iq, "xmlns", "abt");
+        wa_node_attr(props_iq, "type", "get");
+        wa_node *props = wa_node_add_new(props_iq, "props");
+        wa_node_attr(props, "protocol", "1");
+        wa_client_send_iq(c, props_iq, NULL, 0);
+        wa_node_free(props_iq);
+
+        // Initial app state sync (tells Meta server this companion is active & synced)
+        sync_app_state(c);
         return;
     } else if (wa_node_tag_is(node, "failure")) {
         const char *reason = wa_node_get_or(node, "reason", "login failure");

@@ -16,6 +16,8 @@ extern "C" {
 
 // Build the Message protobuf for a plain text (field conversation=1). Appends to out.
 int wa_msg_text_plaintext(const char *text, wa_buf *out);
+// Build the DeviceSentMessage protobuf (field 31): wraps inner_msg with destinationJid. Appends to out.
+int wa_msg_dsm_plaintext(const char *destination_jid, const uint8_t *inner_msg, size_t inner_len, wa_buf *out);
 // Build the Message protobuf carrying a call key (Message.call.callKey) for a call <offer> <enc>.
 int wa_msg_callkey_plaintext(const uint8_t call_key[32], wa_buf *out);
 
@@ -37,7 +39,7 @@ typedef struct { const char *jid; const uint8_t *enc; size_t enc_len; const char
 // Build a fanned-out 1:1 message: <message to=user id type=text><participants><to jid><enc/></to>...</participants>
 // [<device-identity>]. device_identity (from our pairing) is included when any enc is a pkmsg. Caller frees.
 wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_devenc *devs, int ndevs,
-                         const uint8_t *device_identity, size_t di_len);
+                         const uint8_t *device_identity, size_t di_len, const char *peer_recipient_pn);
 
 // Parse an incoming <message>: its from/id/type and the first <enc> (type + bytes). Returns 1 on success.
 typedef struct {
