@@ -37,13 +37,17 @@
         _badge = [[UIImageView alloc] init];
 
         _pinLbl = [[UILabel alloc] init];
-        _pinLbl.font = [UIFont systemFontOfSize:12];
+        _pinLbl.font = [UIFont systemFontOfSize:14];
         _pinLbl.text = @"📌";
+        _pinLbl.backgroundColor = [UIColor clearColor];
+        _pinLbl.textAlignment = NSTextAlignmentCenter;
         _pinLbl.hidden = YES;
 
         _muteLbl = [[UILabel alloc] init];
-        _muteLbl.font = [UIFont systemFontOfSize:12];
+        _muteLbl.font = [UIFont systemFontOfSize:14];
         _muteLbl.text = @"🔕";
+        _muteLbl.backgroundColor = [UIColor clearColor];
+        _muteLbl.textAlignment = NSTextAlignmentCenter;
         _muteLbl.hidden = YES;
 
         for (UIView *v in @[ _avatar, _nameLbl, _lastLbl, _timeLbl, _badge, _pinLbl, _muteLbl ]) [self.contentView addSubview:v];
@@ -56,20 +60,20 @@
     CGFloat w = self.contentView.bounds.size.width, h = self.contentView.bounds.size.height, av = 52;
     _avatar.frame = CGRectMake(10, (h - av) / 2, av, av);
     CGFloat lx = 10 + av + 12, rx = w - 12, tw = 70;
-    CGFloat pinW = _pinLbl.hidden ? 0 : 18;
-    CGFloat muteW = _muteLbl.hidden ? 0 : 18;
+    CGFloat pinW = _pinLbl.hidden ? 0 : 24;
+    CGFloat muteW = _muteLbl.hidden ? 0 : 24;
 
     _timeLbl.frame = CGRectMake(rx - tw, 14, tw, 16);
     _nameLbl.frame = CGRectMake(lx, 14, rx - tw - lx - 4 - pinW, 22);
     if (!_pinLbl.hidden) {
-        _pinLbl.frame = CGRectMake(rx - tw - pinW, 16, pinW, 18);
+        _pinLbl.frame = CGRectMake(rx - tw - pinW, 14, pinW, 20);
     }
     CGSize bs = _badge.image ? _badge.image.size : CGSizeZero;
     _badge.frame = CGRectMake(rx - bs.width, h - 16 - bs.height, bs.width, bs.height);
     CGFloat rightIcons = (bs.width > 0 ? bs.width + 6 : 0) + (muteW > 0 ? muteW + 6 : 0);
     _lastLbl.frame = CGRectMake(lx, 39, rx - lx - rightIcons, 18);
     if (!_muteLbl.hidden) {
-        _muteLbl.frame = CGRectMake(rx - (bs.width > 0 ? bs.width + 6 : 0) - muteW, 39, muteW, 18);
+        _muteLbl.frame = CGRectMake(rx - (bs.width > 0 ? bs.width + 6 : 0) - muteW, 37, muteW, 20);
     }
 }
 @end

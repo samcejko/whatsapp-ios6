@@ -8,6 +8,7 @@
 #import "UI/WAChatViewController.h"
 #import "UI/WASettingsViewController.h"
 #import "UI/WAMediaViewController.h"
+#import "UI/WAMediaGalleryViewController.h"
 #import "UI/WACallViewController.h"
 #import "UI/WAContactInfoViewController.h"
 #import "WAChatStore.h"
@@ -230,6 +231,31 @@
             [cvc onSegmentChanged];
         }
         return YES;
+    }
+    if ([cmd isEqualToString:@"chats"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+        [nav popToRootViewControllerAnimated:NO];
+        if ([nav.topViewController isKindOfClass:[WAChatsViewController class]]) {
+            WAChatsViewController *cvc = (WAChatsViewController *)nav.topViewController;
+            cvc.navSegment.selectedSegmentIndex = 0;
+            [cvc onSegmentChanged];
+        }
+        return YES;
+    }
+    if ([cmd isEqualToString:@"gallery"]) {
+        NSString *jid = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"jid"]) jid = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        }
+        if (jid.length) {
+            NSArray *msgs = [[WAChatStore shared] messagesForJID:jid];
+            WAMediaGalleryViewController *gallery = [[WAMediaGalleryViewController alloc] initWithMessages:msgs];
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:gallery];
+            [WATheme styleNavigationBar:nav.navigationBar];
+            [self.window.rootViewController presentViewController:nav animated:NO completion:nil];
+            return YES;
+        }
     }
     if ([cmd isEqualToString:@"pin"]) {
         NSString *jid = nil;
