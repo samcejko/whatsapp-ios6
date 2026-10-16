@@ -42,3 +42,7 @@
 "media_sticker" = "Sticker";
 "media_location" = "Location";
 "media_contact" = "Contact";
+"yesterday" = "Yesterday";
+"settings" = "Settings";
+"profile" = "Profile";
+"save_to_photos" = "Save to Photos";

@@ -119,6 +119,7 @@ static NSString *durationStr(unsigned int secs)
         NSMutableDictionary *d = [NSMutableDictionary dictionary];
         d[@"out"] = m[@"out"] ?: @NO;
         d[@"kind"] = m[@"kind"] ?: @(WA_MSG_TEXT);
+        d[@"ts"] = m[@"ts"] ?: @0;
         d[@"display"] = [self displayTextFor:m];
         int kind = [m[@"kind"] intValue];
         NSData *thumb = m[@"thumb"];
@@ -226,8 +227,8 @@ static NSString *durationStr(unsigned int secs)
     CGFloat maxW = self.view.bounds.size.width * 0.72 - 24;
     CGSize thumb = [self thumbSizeFor:m];
     CGSize ts = [self textSize:m[@"display"] maxWidth:maxW];
-    CGFloat h = thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
-    return MAX(h, 20) + 26;
+    CGFloat contentH = thumb.height + (thumb.height > 0 && ts.height > 0 ? 6 : 0) + ts.height;
+    return MAX(contentH, 18) + 14 + 16;   // content + time row + vertical padding
 }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip
@@ -247,22 +248,30 @@ static NSString *durationStr(unsigned int secs)
     CGSize thumb = [self thumbSizeFor:m];
     CGSize ts = [self textSize:text maxWidth:maxW];
     CGFloat gap = (thumb.height > 0 && ts.height > 0) ? 6 : 0;
-    CGFloat contentW = MAX(thumb.width, ts.width);
-    CGFloat bw = contentW + 24, bh = thumb.height + gap + ts.height + 16;
-    CGRect bf = out ? CGRectMake(w - bw - 8, 6, bw, bh) : CGRectMake(8, 6, bw, bh);
+
+    // time (+ a sent tick for outgoing) shown small at the bubble's bottom-right
+    NSString *timeStr = WAClockTime([m[@"ts"] unsignedLongLongValue]);
+    if (out && timeStr.length) timeStr = [timeStr stringByAppendingString:@" ✓✓"];
+    UIFont *timeFont = [UIFont systemFontOfSize:11];
+    CGFloat timeW = timeStr.length ? [timeStr sizeWithFont:timeFont].width : 0;
+
+    CGFloat contentW = MAX(MAX(thumb.width, ts.width), timeW);
+    CGFloat contentH = thumb.height + gap + ts.height;
+    CGFloat bw = contentW + 24, bh = contentH + 14 + 14;
+    CGRect bf = out ? CGRectMake(w - bw - 8, 5, bw, bh) : CGRectMake(8, 5, bw, bh);
 
     UIImageView *bubble = [[UIImageView alloc] initWithImage:[WATheme bubbleOutgoing:out]];
     bubble.frame = bf;
     [cell.contentView addSubview:bubble];
 
-    CGFloat y = bf.origin.y + 8;
+    CGFloat y = bf.origin.y + 7;
     UIImage *img = m[@"image"];
     if (thumb.height > 0 && img) {
         UIImageView *iv = [[UIImageView alloc] initWithImage:img];
         iv.frame = CGRectMake(bf.origin.x + 12, y, thumb.width, thumb.height);
         iv.contentMode = UIViewContentModeScaleAspectFill;
         iv.clipsToBounds = YES;
-        iv.layer.cornerRadius = 4;
+        iv.layer.cornerRadius = 5;
         [cell.contentView addSubview:iv];
         if ([m[@"kind"] intValue] == WA_MSG_VIDEO) {   // a play glyph over the video thumbnail
             UILabel *play = [[UILabel alloc] initWithFrame:iv.frame];
@@ -280,8 +289,17 @@ static NSString *durationStr(unsigned int secs)
         lbl.numberOfLines = 0;
         lbl.backgroundColor = [UIColor clearColor];
         lbl.font = [UIFont systemFontOfSize:16];
+        lbl.textColor = [UIColor colorWithWhite:0.1 alpha:1.0];
         lbl.text = text;
         [cell.contentView addSubview:lbl];
+    }
+    if (timeStr.length) {
+        UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(bf.origin.x + bw - 12 - timeW, bf.origin.y + bh - 16, timeW + 1, 13)];
+        tl.font = timeFont;
+        tl.backgroundColor = [UIColor clearColor];
+        tl.textColor = out ? [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0] : [UIColor colorWithWhite:0.55 alpha:1.0];
+        tl.text = timeStr;
+        [cell.contentView addSubview:tl];
     }
     return cell;
 }

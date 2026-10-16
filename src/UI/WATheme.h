@@ -12,4 +12,8 @@
 + (UIImage *)bubbleOutgoing:(BOOL)outgoing;
 + (UIImage *)glossyButtonWithColor:(UIColor *)color;   // stretchable rounded glossy button background
 + (UIImage *)roundCallButton:(UIColor *)color diameter:(CGFloat)d glyph:(NSString *)glyph;
+// A circular avatar: a colour derived from the jid, with the name's initials (or a group glyph for @g.us jids).
++ (UIImage *)avatarForName:(NSString *)name jid:(NSString *)jid diameter:(CGFloat)d;
+// A small coloured unread-count pill (green), e.g. "3".
++ (UIImage *)badgeWithCount:(NSInteger)count;
 @end

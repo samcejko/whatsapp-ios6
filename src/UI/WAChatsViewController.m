@@ -6,11 +6,53 @@
 #import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
 
+// A WhatsApp-style chat-list row: avatar, name, last-message preview, time, unread badge.
+@interface WAChatCell : UITableViewCell
+@property (nonatomic, strong) UIImageView *avatar;
+@property (nonatomic, strong) UILabel *nameLbl;
+@property (nonatomic, strong) UILabel *lastLbl;
+@property (nonatomic, strong) UILabel *timeLbl;
+@property (nonatomic, strong) UIImageView *badge;
+@end
+
+@implementation WAChatCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid
+{
+    if ((self = [super initWithStyle:style reuseIdentifier:rid])) {
+        _avatar = [[UIImageView alloc] init];
+        _nameLbl = [[UILabel alloc] init];
+        _nameLbl.font = [UIFont boldSystemFontOfSize:17];
+        _lastLbl = [[UILabel alloc] init];
+        _lastLbl.font = [UIFont systemFontOfSize:14];
+        _lastLbl.textColor = [UIColor colorWithWhite:0.52 alpha:1.0];
+        _timeLbl = [[UILabel alloc] init];
+        _timeLbl.font = [UIFont systemFontOfSize:12];
+        _timeLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+        _timeLbl.textAlignment = NSTextAlignmentRight;
+        _badge = [[UIImageView alloc] init];
+        for (UIView *v in @[ _avatar, _nameLbl, _lastLbl, _timeLbl, _badge ]) [self.contentView addSubview:v];
+    }
+    return self;
+}
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    CGFloat w = self.contentView.bounds.size.width, h = self.contentView.bounds.size.height, av = 52;
+    _avatar.frame = CGRectMake(10, (h - av) / 2, av, av);
+    CGFloat lx = 10 + av + 12, rx = w - 12, tw = 70;
+    _timeLbl.frame = CGRectMake(rx - tw, 14, tw, 16);
+    _nameLbl.frame = CGRectMake(lx, 14, rx - tw - lx - 4, 22);
+    CGSize bs = _badge.image ? _badge.image.size : CGSizeZero;
+    _badge.frame = CGRectMake(rx - bs.width, h - 16 - bs.height, bs.width, bs.height);
+    _lastLbl.frame = CGRectMake(lx, 39, rx - lx - (bs.width > 0 ? bs.width + 8 : 0), 18);
+}
+@end
+
 @interface WAChatsViewController ()
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UILabel *empty;
 @property (nonatomic, strong) UILabel *banner;
-@property (nonatomic, strong) NSMutableArray *chats;   // array of @{ @"jid", @"name", @"last" }
+@property (nonatomic, strong) NSMutableArray *chats;   // array of @{ @"jid", @"name", @"last", @"ts", @"unread" }
 @end
 
 @implementation WAChatsViewController
@@ -31,7 +73,8 @@
     self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 64;
+    self.table.rowHeight = 70;
+    self.table.separatorColor = [UIColor colorWithWhite:0.86 alpha:1.0];
     [self.view addSubview:self.table];
 
     self.banner = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 28)];
@@ -69,7 +112,9 @@
     for (NSDictionary *row in [[WAChatStore shared] conversationsSorted]) {
         [self.chats addObject:@{ @"jid": row[@"jid"] ?: @"",
                                  @"name": [self displayNameFor:row[@"jid"] name:row[@"name"]],
-                                 @"last": row[@"last"] ?: @"" }];
+                                 @"last": row[@"last"] ?: @"",
+                                 @"ts": row[@"ts"] ?: @0,
+                                 @"unread": row[@"unread"] ?: @0 }];
     }
     self.empty.hidden = self.chats.count > 0;
     [self.table reloadData];
@@ -143,12 +188,17 @@
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip
 {
-    UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:@"c"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
+    WAChatCell *cell = (WAChatCell *)[t dequeueReusableCellWithIdentifier:@"c"];
+    if (!cell) cell = [[WAChatCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"c"];
     NSDictionary *chat = self.chats[ip.row];
-    cell.textLabel.text = chat[@"name"];
-    cell.detailTextLabel.text = chat[@"last"];
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    NSString *name = chat[@"name"];
+    cell.nameLbl.text = name;
+    cell.lastLbl.text = chat[@"last"];
+    cell.avatar.image = [WATheme avatarForName:name jid:chat[@"jid"] diameter:52];
+    cell.timeLbl.text = WAListTime([chat[@"ts"] unsignedLongLongValue]);
+    NSInteger unread = [chat[@"unread"] integerValue];
+    cell.badge.image = unread > 0 ? [WATheme badgeWithCount:unread] : nil;
+    [cell setNeedsLayout];
     return cell;
 }
 

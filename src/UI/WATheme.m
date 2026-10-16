@@ -5,8 +5,8 @@
 
 + (UIColor *)header { return [UIColor colorWithRed:0.03 green:0.37 blue:0.33 alpha:1.0]; }        // teal #075E54-ish
 + (UIColor *)accent { return [UIColor colorWithRed:0.09 green:0.56 blue:0.27 alpha:1.0]; }         // green
-+ (UIColor *)outgoingBubble { return [UIColor colorWithRed:0.86 green:0.97 blue:0.78 alpha:1.0]; } // #DCF8C6
-+ (UIColor *)incomingBubble { return [UIColor whiteColor]; }
++ (UIColor *)outgoingBubble { return [UIColor colorWithRed:0.85 green:0.95 blue:0.74 alpha:1.0]; } // #D9F2BD light green
++ (UIColor *)incomingBubble { return [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:1.0]; }    // white (RGB, never grayscale)
 
 + (void)styleNavigationBar:(UINavigationBar *)bar
 {
@@ -56,9 +56,12 @@
     CGContextSaveGState(c);
     [p addClip];
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    const CGFloat *rgba = CGColorGetComponents(fill.CGColor);
-    CGFloat comps[8] = { MIN(rgba[0] + 0.04, 1), MIN(rgba[1] + 0.04, 1), MIN(rgba[2] + 0.04, 1), 1,
-                         rgba[0], rgba[1], rgba[2], 1 };
+    // Robustly read RGBA: whiteColor et al. are in the grayscale space (2 components), so CGColorGetComponents
+    // would read out of bounds. getRed:…/getWhite:… normalise any UIColor to RGB.
+    CGFloat rr, gg, bb, aa;
+    if (![fill getRed:&rr green:&gg blue:&bb alpha:&aa]) { CGFloat ww = 1; [fill getWhite:&ww alpha:&aa]; rr = gg = bb = ww; }
+    CGFloat comps[8] = { MIN(rr + 0.04, 1), MIN(gg + 0.04, 1), MIN(bb + 0.04, 1), 1,
+                         rr, gg, bb, 1 };
     CGFloat locs[2] = { 0, 1 };
     CGGradientRef g = CGGradientCreateWithColorComponents(cs, comps, locs, 2);
     CGContextDrawLinearGradient(c, g, CGPointMake(0, 0), CGPointMake(0, h), 0);
@@ -95,6 +98,83 @@
     UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return [img resizableImageWithCapInsets:UIEdgeInsetsMake(r, r, r, r)];
+}
+
++ (UIImage *)avatarForName:(NSString *)name jid:(NSString *)jid diameter:(CGFloat)d
+{
+    // A stable colour per contact, from a hash of the jid.
+    static const CGFloat palette[8][3] = {
+        { 0.38, 0.49, 0.85 }, { 0.17, 0.63, 0.60 }, { 0.85, 0.44, 0.34 }, { 0.55, 0.45, 0.76 },
+        { 0.90, 0.60, 0.20 }, { 0.30, 0.66, 0.38 }, { 0.80, 0.38, 0.56 }, { 0.36, 0.58, 0.68 },
+    };
+    unsigned h = 5381;
+    for (NSUInteger i = 0; i < jid.length; i++) h = ((h << 5) + h) + [jid characterAtIndex:i];
+    const CGFloat *rgb = palette[h & 7];
+
+    BOOL group = [jid rangeOfString:@"@g.us"].location != NSNotFound;
+    NSString *initials = @"";
+    if (!group) {
+        NSArray *parts = [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] componentsSeparatedByString:@" "];
+        NSMutableString *ini = [NSMutableString string];
+        for (NSString *p in parts) { if (p.length && ini.length < 2) [ini appendString:[[p substringToIndex:1] uppercaseString]]; }
+        initials = ini;
+    }
+
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(d, d), NO, 0);
+    CGContextRef c = UIGraphicsGetCurrentContext();
+    CGRect rc = CGRectMake(0, 0, d, d);
+    CGContextSaveGState(c);
+    CGContextAddEllipseInRect(c, rc);
+    CGContextClip(c);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGFloat comps[8] = { MIN(rgb[0] + 0.12, 1), MIN(rgb[1] + 0.12, 1), MIN(rgb[2] + 0.12, 1), 1, rgb[0] * 0.9, rgb[1] * 0.9, rgb[2] * 0.9, 1 };
+    CGFloat locs[2] = { 0, 1 };
+    CGGradientRef g = CGGradientCreateWithColorComponents(cs, comps, locs, 2);
+    CGContextDrawLinearGradient(c, g, CGPointMake(0, 0), CGPointMake(0, d), 0);
+    CGGradientRelease(g);
+    CGColorSpaceRelease(cs);
+    CGContextRestoreGState(c);
+    [[UIColor whiteColor] set];
+    if (group || initials.length == 0) {
+        NSString *glyph = group ? @"\U0001F465" : @"\U0001F464";   // group / person
+        UIFont *f = [UIFont systemFontOfSize:d * 0.5];
+        CGSize ts = [glyph sizeWithFont:f];
+        [glyph drawAtPoint:CGPointMake((d - ts.width) / 2, (d - ts.height) / 2) withFont:f];
+    } else {
+        UIFont *f = [UIFont boldSystemFontOfSize:d * 0.4];
+        CGSize ts = [initials sizeWithFont:f];
+        [initials drawAtPoint:CGPointMake((d - ts.width) / 2, (d - ts.height) / 2) withFont:f];
+    }
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return img;
+}
+
++ (UIImage *)badgeWithCount:(NSInteger)count
+{
+    NSString *s = count > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)count];
+    UIFont *f = [UIFont boldSystemFontOfSize:13];
+    CGSize ts = [s sizeWithFont:f];
+    CGFloat h = 20, w = MAX(h, ts.width + 12);
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(w, h), NO, 0);
+    CGContextRef c = UIGraphicsGetCurrentContext();
+    UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, w, h) cornerRadius:h / 2];
+    [p addClip];
+    UIColor *a = [self accent];
+    CGFloat rr, gg, bb, aa;
+    [a getRed:&rr green:&gg blue:&bb alpha:&aa];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGFloat comps[8] = { MIN(rr + 0.1, 1), MIN(gg + 0.1, 1), MIN(bb + 0.1, 1), 1, rr * 0.85, gg * 0.85, bb * 0.85, 1 };
+    CGFloat locs[2] = { 0, 1 };
+    CGGradientRef g = CGGradientCreateWithColorComponents(cs, comps, locs, 2);
+    CGContextDrawLinearGradient(c, g, CGPointMake(0, 0), CGPointMake(0, h), 0);
+    CGGradientRelease(g);
+    CGColorSpaceRelease(cs);
+    [[UIColor whiteColor] set];
+    [s drawAtPoint:CGPointMake((w - ts.width) / 2, (h - ts.height) / 2) withFont:f];
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return img;
 }
 
 + (UIImage *)roundCallButton:(UIColor *)color diameter:(CGFloat)d glyph:(NSString *)glyph
