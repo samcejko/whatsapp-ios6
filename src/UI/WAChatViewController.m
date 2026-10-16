@@ -54,6 +54,7 @@
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.allowsSelection = YES;   // tapping an image row opens the full-screen viewer
+    [self.table addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)]];
     [self.view addSubview:self.table];
 
     self.bar = [[UIView alloc] init];
@@ -347,6 +348,21 @@ static NSString *durationStr(unsigned int secs)
         [cell.contentView addSubview:tl];
     }
     return cell;
+}
+
+// Long-press a text bubble to copy it.
+- (void)onLongPress:(UILongPressGestureRecognizer *)g
+{
+    if (g.state != UIGestureRecognizerStateBegan) return;
+    NSIndexPath *ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
+    if (!ip) return;
+    NSDictionary *m = self.messages[ip.row];
+    NSString *text = m[@"display"];
+    if (m[@"sep"] || !text.length) return;
+    [[UIPasteboard generalPasteboard] setString:text];
+    UIAlertView *a = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"copied") delegate:nil cancelButtonTitle:nil otherButtonTitles:nil];
+    [a show];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [a dismissWithClickedButtonIndex:0 animated:YES]; });
 }
 
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip
