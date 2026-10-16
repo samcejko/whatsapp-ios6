@@ -91,16 +91,98 @@ static int wait_fd(sock_t fd, int for_write, int timeout_ms)
     return r > 0 ? 1 : r;
 }
 
+// getaddrinfo() has no timeout and blocks until the OS resolver gives up (can be minutes on flaky DNS, e.g. a
+// phone hotspot), which would hang the whole connect with no way for the client's connect-retry to kick in.
+// Resolve on a detached worker and wait at most timeout_ms; if it overruns we abandon the worker (it frees
+// itself when getaddrinfo finally returns) and report failure so the caller retries. Returns 0 + *out (caller
+// frees) on success, -1 otherwise.
+#ifndef _WIN32
+#include <pthread.h>
+struct wa_resolve_job {
+    char host[256], port[8];
+    struct addrinfo *res;
+    int rc, done, abandoned;
+    pthread_mutex_t m;
+};
+static void *wa_resolve_run(void *arg)
+{
+    struct wa_resolve_job *j = (struct wa_resolve_job *)arg;
+    struct addrinfo hints, *r = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int rc = getaddrinfo(j->host, j->port, &hints, &r);
+    pthread_mutex_lock(&j->m);
+    j->res = r;
+    j->rc = rc;
+    j->done = 1;
+    int ab = j->abandoned;
+    pthread_mutex_unlock(&j->m);
+    if (ab) {                 // the caller already gave up: clean up after ourselves
+        if (r) freeaddrinfo(r);
+        pthread_mutex_destroy(&j->m);
+        free(j);
+    }
+    return NULL;
+}
+static int resolve_timeout(const char *host, const char *port, int timeout_ms, struct addrinfo **out)
+{
+    struct wa_resolve_job *j = (struct wa_resolve_job *)calloc(1, sizeof *j);
+    if (!j) return -1;
+    snprintf(j->host, sizeof j->host, "%s", host);
+    snprintf(j->port, sizeof j->port, "%s", port);
+    pthread_mutex_init(&j->m, NULL);
+    pthread_t th;
+    if (pthread_create(&th, NULL, wa_resolve_run, j) != 0) {   // fall back to a blocking resolve
+        pthread_mutex_destroy(&j->m);
+        free(j);
+        struct addrinfo hints;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        return (getaddrinfo(host, port, &hints, out) == 0 && *out) ? 0 : -1;
+    }
+    pthread_detach(th);
+    uint64_t deadline = wa_now_us() + (uint64_t)(timeout_ms > 0 ? timeout_ms : 0) * 1000;
+    for (;;) {
+        pthread_mutex_lock(&j->m);
+        if (j->done) {
+            int ok = (j->rc == 0 && j->res != NULL);
+            *out = j->res;
+            pthread_mutex_unlock(&j->m);
+            pthread_mutex_destroy(&j->m);
+            free(j);
+            return ok ? 0 : -1;
+        }
+        if (wa_now_us() >= deadline) {
+            j->abandoned = 1;     // worker frees itself once getaddrinfo returns
+            pthread_mutex_unlock(&j->m);
+            return -1;
+        }
+        pthread_mutex_unlock(&j->m);
+        wa_sleep_ms(50);
+    }
+}
+#endif
+
 static sock_t tcp_connect(const char *host, int port, int timeout_ms, char *err, size_t errlen)
 {
     char portstr[8];
     snprintf(portstr, sizeof portstr, "%d", port);
-    struct addrinfo hints, *res = NULL, *ai;
+    struct addrinfo *res = NULL, *ai;
+#ifdef _WIN32
+    struct addrinfo hints;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     int rc = getaddrinfo(host, portstr, &hints, &res);
     if (rc != 0 || !res) { snprintf(err, errlen, "cannot resolve %s", host); return SOCK_INVALID; }
+#else
+    if (resolve_timeout(host, portstr, timeout_ms, &res) != 0 || !res) {
+        snprintf(err, errlen, "cannot resolve %s (dns timeout)", host);
+        return SOCK_INVALID;
+    }
+#endif
     sock_t fd = SOCK_INVALID;
     for (ai = res; ai; ai = ai->ai_next) {
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
