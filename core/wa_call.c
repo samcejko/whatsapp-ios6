@@ -97,13 +97,15 @@ wa_node *wa_call_build_offer(const wa_call_offer *o)
     wa_node_attr(c, "ver", "1");
     wa_node_set_bytes(c, cap, 7);
 
-    if (o->nkeys >= 1) {
+    if (o->nkeys > 1) {
         wa_node *dest = wa_node_add_new(offer, "destination");
         for (int i = 0; i < o->nkeys; i++) {
             wa_node *to = wa_node_add_new(dest, "to");
             wa_node_attr(to, "jid", o->keys[i].device_jid);
             wa_node_add(to, enc_node(&o->keys[i]));
         }
+    } else if (o->nkeys == 1) {
+        wa_node_add(offer, enc_node(&o->keys[0]));
     }
     wa_node_attr(wa_node_add_new(offer, "encopt"), "keygen", "2");
     if (o->device_identity) wa_node_set_bytes(wa_node_add_new(offer, "device-identity"), o->device_identity, o->device_identity_len);
