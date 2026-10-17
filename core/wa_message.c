@@ -214,14 +214,11 @@ wa_node *wa_msg_build_node(const char *to, const char *id, const uint8_t *enc, s
 wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_devenc *devs, int ndevs,
                          const uint8_t *device_identity, size_t di_len, const char *peer_recipient_pn)
 {
+    (void)peer_recipient_pn;
     wa_node *m = wa_node_new("message");
     wa_node_attr(m, "to", to_user);
     wa_node_attr(m, "id", id);
     wa_node_attr(m, "type", "text");
-    if (peer_recipient_pn && peer_recipient_pn[0]) {
-        wa_node_attr(m, "recipient_pn", peer_recipient_pn);
-        wa_node_attr(m, "peer_recipient_pn", peer_recipient_pn);
-    }
     wa_node *parts = wa_node_add_new(m, "participants");
     int any_pkmsg = 0;
     for (int i = 0; i < ndevs; i++) {
@@ -352,8 +349,7 @@ int wa_message_selftest(void)
         wa_node *parts = wa_node_child(dmb, "participants");
         wa_node *di_node = wa_node_child(dmb, "device-identity");
         ok = parts && parts->nchildren == 2 && di_node && di_node->content_len == 64 &&
-             wa_node_find(parts, "enc") != NULL &&
-             strcmp(wa_node_get_or(dmb, "peer_recipient_pn", ""), "420777123456@s.whatsapp.net") == 0;
+             wa_node_find(parts, "enc") != NULL;
     } else ok = 0;
     wa_node_free(dm);
     wa_node_free(dmb);
