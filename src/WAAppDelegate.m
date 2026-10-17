@@ -235,6 +235,9 @@
         }
         if (!name.length && jid.length) name = WADisplayNameForChat(jid, nil);
         if (!name.length) name = @"Test";
+        if (!incoming && jid.length) {
+            [[WASession shared] placeCallTo:jid video:video];
+        }
         WACallViewController *c = [[WACallViewController alloc] initWithJID:jid name:name video:video incoming:incoming];
         [self.window.rootViewController presentViewController:c animated:NO completion:nil];
         return YES;
