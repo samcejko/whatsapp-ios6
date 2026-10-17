@@ -13,6 +13,7 @@ extern NSString *const WASessionPresenceChanged; // userInfo: @"jid" (NSString),
 extern NSString *const WASessionIncomingCall;    // userInfo: @"jid" (NSString), @"video" (NSNumber BOOL), @"callId" (NSString)
 extern NSString *const WASessionCallAccepted;    // userInfo: @"callId" (NSString)
 extern NSString *const WASessionCallEnded;       // userInfo: @"callId" (NSString), @"reason" (NSString, optional)
+extern NSString *const WASessionCallAudioPacket; // userInfo: @"payload" (NSData)
 
 typedef NS_ENUM(NSInteger, WASessionState) {
     WASessionStateDisconnected = 0,
@@ -48,6 +49,7 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 - (void)acceptCall;
 - (void)rejectCall;
 - (void)terminateCall;
+- (void)sendCallAudioFrame:(NSData *)opusFrame;
 
 // Subscribe/unsubscribe to presence updates for a contact JID
 - (void)subscribePresence:(NSString *)jid;

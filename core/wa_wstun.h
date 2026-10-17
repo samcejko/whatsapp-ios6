@@ -45,6 +45,12 @@ int wa_stun_xor_endpoint(const char *ipv4, uint16_t port, uint8_t out[6]);
 // Native sender subscription: 1-byte count=1 + big-endian SSRC (5 bytes).
 void wa_stun_native_sender_sub(uint32_t ssrc, uint8_t out[5]);
 
+// Build a WhatsApp Web/WASM STUN ALLOCATE request into out carrying the relay token, stream descriptors, and XOR endpoint.
+int wa_stun_build_wasm_allocate(wa_buf *out, const uint8_t tid[12],
+                                const uint8_t *token, size_t token_len,
+                                const char *ip, uint16_t port,
+                                const uint8_t *mi_key, size_t mi_key_len);
+
 // Parsing
 int wa_stun_is_stun(const uint8_t *data, size_t len);
 int wa_stun_type(const uint8_t *data, size_t len, uint16_t *type);

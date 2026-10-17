@@ -28,6 +28,8 @@ wa_sig_session *wa_sess_get(wa_sess_store *s, const char *jid);
 // Inserts or replaces the session for a device JID. Returns 0 or -1 (full).
 int wa_sess_put(wa_sess_store *s, const char *jid, const wa_sig_session *sess);
 int wa_sess_has(const wa_sess_store *s, const char *jid);
+void wa_sess_del(wa_sess_store *s, const char *jid);
+void wa_sess_del_user(wa_sess_store *s, const char *user_prefix);
 
 int wa_sess_save(const wa_sess_store *s, const char *path);
 int wa_sess_load(wa_sess_store *s, const char *path);   // -1 when missing/corrupt

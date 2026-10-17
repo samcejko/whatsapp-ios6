@@ -23,6 +23,37 @@ wa_sig_session *wa_sess_get(wa_sess_store *s, const char *jid)
 
 int wa_sess_has(const wa_sess_store *s, const char *jid) { return find(s, jid) >= 0; }
 
+void wa_sess_del(wa_sess_store *s, const char *jid)
+{
+    if (!s || !jid) return;
+    int i = find(s, jid);
+    if (i >= 0) {
+        memset(&s->entries[i], 0, sizeof s->entries[i]);
+        if (s->count > 0) s->count--;
+    }
+}
+
+void wa_sess_del_user(wa_sess_store *s, const char *user_prefix)
+{
+    if (!s || !user_prefix || !user_prefix[0]) return;
+    char bare[64];
+    snprintf(bare, sizeof bare, "%s", user_prefix);
+    char *at = strchr(bare, '@');
+    if (at) *at = 0;
+    char *colon = strchr(bare, ':');
+    if (colon) *colon = 0;
+    size_t ulen = strlen(bare);
+    if (!ulen) return;
+    for (int i = 0; i < WA_SESS_MAX; i++) {
+        if (!s->entries[i].used) continue;
+        if (strncmp(s->entries[i].jid, bare, ulen) == 0 &&
+            (s->entries[i].jid[ulen] == ':' || s->entries[i].jid[ulen] == '@')) {
+            memset(&s->entries[i], 0, sizeof s->entries[i]);
+            if (s->count > 0) s->count--;
+        }
+    }
+}
+
 int wa_sess_put(wa_sess_store *s, const char *jid, const wa_sig_session *sess)
 {
     if (strlen(jid) >= sizeof s->entries[0].jid) return -1;

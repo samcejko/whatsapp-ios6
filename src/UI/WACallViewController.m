@@ -82,6 +82,7 @@
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallAccepted:) name:WASessionCallAccepted object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallEnded:) name:WASessionCallEnded object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallAudioPacket:) name:WASessionCallAudioPacket object:nil];
 }
 
 - (void)drawBackground
@@ -154,6 +155,14 @@
     [self performSelector:@selector(dismiss) withObject:nil afterDelay:1.0];
 }
 
+- (void)onCallAudioPacket:(NSNotification *)n
+{
+    NSData *payload = n.userInfo[@"payload"];
+    if (payload.length && self.audio && self.connected) {
+        [self.audio playFrame:payload];
+    }
+}
+
 - (void)connect
 {
     self.connected = YES;
@@ -163,7 +172,9 @@
     [self tick];
     // Open the mic/speaker (echo-cancelled, 16 kHz Opus)
     self.audio = [[WAAudioEngine alloc] init];
-    self.audio.onFrame = ^(NSData *frame) { /* call engine: SRTP-protect + wa_rtc_send */ (void)frame; };
+    self.audio.onFrame = ^(NSData *frame) {
+        [[WASession shared] sendCallAudioFrame:frame];
+    };
     [self.audio start];
 }
 

@@ -10,6 +10,10 @@
 #include "wa_history.h"
 #include "wa_callengine.h"
 #include "wa_net.h"
+#include "wa_rtc.h"
+#include "wa_wstun.h"
+#include "wa_srtp.h"
+#include "wa_relay.h"
 
 NSString *const WASessionStateChanged = @"WASessionStateChanged";
 NSString *const WASessionQRChanged = @"WASessionQRChanged";
@@ -22,6 +26,7 @@ NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
 NSString *const WASessionIncomingCall = @"WASessionIncomingCall";
 NSString *const WASessionCallAccepted = @"WASessionCallAccepted";
 NSString *const WASessionCallEnded = @"WASessionCallEnded";
+NSString *const WASessionCallAudioPacket = @"WASessionCallAudioPacket";
 
 @interface WASession () {
 @public
@@ -33,6 +38,7 @@ NSString *const WASessionCallEnded = @"WASessionCallEnded";
     NSThread *_thread;
     wa_call_state _currentCall;
     int _hasCurrentCall;
+    wa_rtc *_rtc;
 }
 @property (nonatomic) WASessionState state;
 @property (nonatomic, copy) NSString *qrString;
@@ -83,6 +89,126 @@ static void cb_connected(void *ctx)
             }
         }
     });
+}
+
+static void rtc_on_open(void *ctx)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    WALog(@"call: WebRTC data channel opened, sending STUN ALLOCATE & ping");
+    if (!self->_rtc || !self->_currentCall.has_relay) return;
+
+    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, 1);
+    if (!ep) return;
+
+    int tok_idx = (ep->token_id >= 0 && ep->token_id < self->_currentCall.relay.ntokens) ? ep->token_id : 0;
+    const uint8_t *tok = self->_currentCall.relay.tokens[tok_idx];
+    size_t tok_len = self->_currentCall.relay.token_len[tok_idx];
+
+    const uint8_t *mi = self->_currentCall.relay.has_relay_key ? self->_currentCall.relay.relay_key
+                       : (self->_currentCall.relay.has_hbh_key ? self->_currentCall.relay.hbh_key : NULL);
+    size_t mi_len = self->_currentCall.relay.has_relay_key ? self->_currentCall.relay.relay_key_len
+                   : (self->_currentCall.relay.has_hbh_key ? 30 : 0);
+
+    uint8_t tid[12];
+    wa_random(tid, 12);
+    wa_buf alloc_req;
+    wa_buf_init(&alloc_req);
+    if (wa_stun_build_wasm_allocate(&alloc_req, tid, tok, tok_len, ep->ipv4, ep->port, mi, mi_len) == 0) {
+        wa_rtc_send(self->_rtc, alloc_req.data, alloc_req.len);
+    }
+    wa_buf_free(&alloc_req);
+
+    // Keepalive ping
+    uint8_t ping[20];
+    wa_random(tid, 12);
+    wa_stun_ping(ping, tid);
+    wa_rtc_send(self->_rtc, ping, 20);
+}
+
+static void rtc_on_packet(void *ctx, const uint8_t *data, size_t len)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    if (!data || len < 4) return;
+
+    if (wa_stun_is_stun(data, len)) {
+        uint16_t type = 0;
+        wa_stun_type(data, len, &type);
+        if (type == WA_STUN_PING) {
+            uint8_t pong[20];
+            const uint8_t *tid = wa_stun_tid(data, len);
+            if (tid) {
+                wa_put_u16(pong, WA_STUN_PONG);
+                wa_put_u16(pong + 2, 0);
+                wa_put_u32(pong + 4, 0x2112a442u);
+                memcpy(pong + 8, tid, 12);
+                wa_rtc_send(self->_rtc, pong, 20);
+            }
+        }
+        return;
+    }
+
+    if ((data[0] & 0xC0) == 0x80 && len >= 16 && self->_currentCall.srtp_ready) {
+        uint8_t cc = data[0] & 0x0F;
+        size_t hdr_len = 12 + cc * 4;
+        if (len <= hdr_len) return;
+
+        size_t tag_len = self->_currentCall.relay.warp_mi_tag_len ? self->_currentCall.relay.warp_mi_tag_len : WA_WARP_TAG_LEN;
+        if (len < hdr_len + tag_len) return;
+
+        size_t payload_len = len - hdr_len - tag_len;
+        uint16_t seq = wa_get_u16(data + 2);
+        uint32_t ssrc = wa_get_u32(data + 8);
+        uint32_t roc = wa_roc_recv_estimate(&self->_currentCall.roc_recv, seq);
+        wa_roc_recv_commit(&self->_currentCall.roc_recv, roc, seq);
+
+        uint8_t payload[1500];
+        if (payload_len <= sizeof payload) {
+            memcpy(payload, data + hdr_len, payload_len);
+            if (wa_srtp_crypt_payload(&self->_currentCall.recv_keys, ssrc, roc, seq, payload, payload_len) == 0) {
+                NSData *payloadData = [NSData dataWithBytes:payload length:payload_len];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[NSNotificationCenter defaultCenter] postNotificationName:WASessionCallAudioPacket
+                                                                        object:self
+                                                                      userInfo:@{ @"payload": payloadData }];
+                });
+            }
+        }
+    }
+}
+
+static void rtc_on_closed(void *ctx, const char *reason)
+{
+    WASession *self = (__bridge WASession *)ctx;
+    WALog(@"call: media transport closed (%s)", reason ? reason : "normal");
+    self->_rtc = NULL;
+}
+
+static void start_call_media(WASession *self)
+{
+    if (!self->_hasCurrentCall || self->_rtc || !self->_currentCall.has_relay) return;
+
+    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, 1);
+    if (!ep || !ep->ipv4[0]) {
+        WALog(@"call: no suitable relay endpoint found");
+        return;
+    }
+
+    const char *our_lid = self->_dev.lid[0] ? self->_dev.lid : self->_dev.pn;
+    const char *peer_jid = self->_currentCall.peer;
+    wa_callengine_setup_srtp(&self->_currentCall, our_lid, peer_jid);
+
+    WALog(@"call: connecting media transport to %s:%u", ep->ipv4, ep->port);
+    wa_rtc_callbacks cb;
+    memset(&cb, 0, sizeof cb);
+    cb.ctx = (__bridge void *)self;
+    cb.on_open = rtc_on_open;
+    cb.on_packet = rtc_on_packet;
+    cb.on_closed = rtc_on_closed;
+
+    self->_rtc = wa_rtc_connect(ep->ipv4, ep->port, &cb);
+    if (!self->_rtc) {
+        WALog(@"call: wa_rtc_connect failed");
+    }
 }
 
 // Acknowledge a received stanza so the server stops redelivering it.
@@ -290,13 +416,32 @@ static void cb_node(void *ctx, const wa_node *node)
                                                                               @"callId": (callId ?: @""),
                                                                               @"video": @(video) }];
             });
+            if (self->_currentCall.has_relay) {
+                start_call_media(self);
+            }
             return;
         }
+
+        if (self->_hasCurrentCall) {
+            if (wa_callengine_on_relay(node, &self->_currentCall)) {
+                WALog(@"call: received relay info, starting media transport");
+                start_call_media(self);
+            }
+        }
+
         for (int i = 0; i < node->nchildren; i++) {
             const wa_node *child = node->children[i];
             if (wa_node_tag_is(child, "accept") || wa_node_tag_is(child, "preaccept")) {
                 const char *cid = wa_node_get(child, "call-id");
                 NSString *callId = cid ? [NSString stringWithUTF8String:cid] : @"";
+                if (self->_hasCurrentCall) {
+                    if (wa_callengine_on_relay(child, &self->_currentCall)) {
+                        start_call_media(self);
+                    }
+                    if (self->_currentCall.has_relay) {
+                        start_call_media(self);
+                    }
+                }
                 if (wa_node_tag_is(child, "accept")) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [[NSNotificationCenter defaultCenter] postNotificationName:WASessionCallAccepted
@@ -307,6 +452,10 @@ static void cb_node(void *ctx, const wa_node *node)
                 return;
             }
             if (wa_node_tag_is(child, "terminate") || wa_node_tag_is(child, "reject")) {
+                if (self->_rtc) {
+                    wa_rtc_close(self->_rtc);
+                    self->_rtc = NULL;
+                }
                 self->_hasCurrentCall = 0;
                 const char *cid = wa_node_get(child, "call-id");
                 const char *rsn = wa_node_get(child, "reason");
@@ -345,6 +494,16 @@ static void cb_node(void *ctx, const wa_node *node)
     if (wa_node_tag_is(node, "receipt")) {
         send_ack(self, node, "receipt");
         const char *rtype = wa_node_get(node, "type");
+        const char *from = wa_node_get(node, "from");
+        if (rtype && strcmp(rtype, "retry") == 0) {
+            WALog(@"receipt retry from %s - resetting signal session", from ? from : "(null)");
+            if (from && from[0] && self->_sessions) {
+                char bare_from[80] = {0};
+                wa_jid_to_non_ad(from, bare_from, sizeof bare_from);
+                wa_sess_del(self->_sessions, bare_from[0] ? bare_from : from);
+                wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+            }
+        }
         int st = WA_STATUS_DELIVERY_ACK;
         if (rtype) {
             if (strcmp(rtype, "read") == 0 || strcmp(rtype, "read-self") == 0) st = WA_STATUS_READ;
@@ -653,6 +812,15 @@ static void action_send_text(wa_client *c, void *ctx)
     }
     if (rc == 0) {
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+        const char *fid = a->mid[0] ? a->mid : used_id;
+        if (fid[0]) {
+            NSString *mid = [NSString stringWithUTF8String:fid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_SERVER_ACK) }];
+            });
+        }
     } else {
         const char *fid = a->mid[0] ? a->mid : used_id;
         if (fid[0]) {
@@ -695,6 +863,9 @@ static void action_accept_call(wa_client *c, void *ctx)
     WASession *self = (__bridge WASession *)ctx;
     if (self->_hasCurrentCall) {
         wa_callengine_accept(c, &self->_currentCall);
+        if (self->_currentCall.has_relay) {
+            start_call_media(self);
+        }
     }
 }
 
@@ -703,6 +874,7 @@ static void action_reject_call(wa_client *c, void *ctx)
     WASession *self = (__bridge WASession *)ctx;
     if (self->_hasCurrentCall) {
         wa_callengine_reject(c, &self->_currentCall);
+        if (self->_rtc) { wa_rtc_close(self->_rtc); self->_rtc = NULL; }
         self->_hasCurrentCall = 0;
     }
 }
@@ -712,6 +884,7 @@ static void action_terminate_call(wa_client *c, void *ctx)
     WASession *self = (__bridge WASession *)ctx;
     if (self->_hasCurrentCall) {
         wa_callengine_terminate(c, &self->_currentCall, "hangup");
+        if (self->_rtc) { wa_rtc_close(self->_rtc); self->_rtc = NULL; }
         self->_hasCurrentCall = 0;
     }
 }
@@ -741,6 +914,15 @@ static void action_send_image(wa_client *c, void *ctx)
                                 used_id, sizeof used_id);
     if (rc == 0) {
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+        const char *fid = a->mid[0] ? a->mid : used_id;
+        if (fid[0]) {
+            NSString *mid = [NSString stringWithUTF8String:fid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_SERVER_ACK) }];
+            });
+        }
     } else {
         const char *fid = a->mid[0] ? a->mid : used_id;
         if (fid[0]) {
@@ -765,11 +947,20 @@ static void action_send_audio(wa_client *c, void *ctx)
     char used_id[40] = { 0 };
     int rc = wa_chat_send_audio(c, self->_sessions, a->jid,
                                 a->jpeg, a->jpeg_len,
-                                a->duration, "audio/mp4",
+                                a->duration, "audio/ogg; codecs=opus",
                                 a->mid[0] ? a->mid : NULL,
                                 used_id, sizeof used_id);
     if (rc == 0) {
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
+        const char *fid = a->mid[0] ? a->mid : used_id;
+        if (fid[0]) {
+            NSString *mid = [NSString stringWithUTF8String:fid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus
+                                                                    object:self
+                                                                  userInfo:@{ @"id": mid, @"status": @(WA_STATUS_SERVER_ACK) }];
+            });
+        }
     } else {
         const char *fid = a->mid[0] ? a->mid : used_id;
         if (fid[0]) {
@@ -817,6 +1008,10 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 - (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid quoted:(NSDictionary *)quoted
 {
     if (!_client || !jid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_action_ctx *a = (wa_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
@@ -846,6 +1041,10 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 - (void)sendReaction:(NSString *)emoji toMessageId:(NSString *)mid fromMe:(BOOL)fromMe inChat:(NSString *)jid
 {
     if (!_client || !jid.length || !mid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_action_ctx *a = (wa_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
@@ -858,6 +1057,10 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 - (void)sendImage:(NSData *)jpegData thumb:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid
 {
     if (!_client || !jid.length || !jpegData.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_image_action_ctx *a = (wa_image_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
@@ -893,6 +1096,10 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 - (void)sendAudio:(NSData *)audioData duration:(uint32_t)dur toJID:(NSString *)jid msgId:(NSString *)mid
 {
     if (!_client || !jid.length || !audioData.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_image_action_ctx *a = (wa_image_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
     snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
@@ -929,6 +1136,11 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video
 {
     if (!_client || !jid.length) return;
+    NSString *callJid = jid;
+    if ([callJid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:callJid];
+        if (pn.length) callJid = pn;
+    }
     [[WAChatStore shared] recordCallLog:@{
         @"jid": jid,
         @"name": WADisplayNameForChat(jid, nil),
@@ -938,7 +1150,7 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
     }];
     wa_action_ctx *a = (wa_action_ctx *)calloc(1, sizeof *a);
     a->session = (__bridge void *)self;
-    snprintf(a->jid, sizeof a->jid, "%s", jid.UTF8String);
+    snprintf(a->jid, sizeof a->jid, "%s", callJid.UTF8String);
     a->video = video ? 1 : 0;
     if (wa_client_post(_client, action_place_call, a) != 0) free(a);
 }
@@ -959,6 +1171,29 @@ static void action_send_read_receipt(wa_client *c, void *ctx)
 {
     if (!_client) return;
     wa_client_post(_client, action_terminate_call, (__bridge void *)self);
+}
+
+- (void)sendCallAudioFrame:(NSData *)opusFrame
+{
+    if (!_rtc || !_currentCall.srtp_ready || opusFrame.length == 0 || opusFrame.length > 1200) return;
+
+    uint8_t rtp[1500];
+    rtp[0] = 0x80;
+    rtp[1] = 111; // Opus dynamic payload type
+    uint16_t seq = _currentCall.rtp_seq++;
+    wa_put_u16(rtp + 2, seq);
+    wa_put_u32(rtp + 4, _currentCall.rtp_ts);
+    _currentCall.rtp_ts += 320;
+    wa_put_u32(rtp + 8, _currentCall.send_ssrc);
+
+    memcpy(rtp + 12, opusFrame.bytes, opusFrame.length);
+    uint32_t roc = wa_roc_send_advance(&_currentCall.roc_send, seq);
+    wa_srtp_crypt_payload(&_currentCall.send_keys, _currentCall.send_ssrc, roc, seq, rtp + 12, opusFrame.length);
+
+    size_t tag_len = _currentCall.relay.warp_mi_tag_len ? _currentCall.relay.warp_mi_tag_len : WA_WARP_TAG_LEN;
+    wa_srtp_warp_tag(_currentCall.send_keys.auth_key, rtp, 12 + opusFrame.length, roc, rtp + 12 + opusFrame.length);
+
+    wa_rtc_send(_rtc, rtp, 12 + opusFrame.length + tag_len);
 }
 
 typedef struct {
@@ -991,6 +1226,10 @@ static void action_send_chatstate(wa_client *c, void *ctx)
 - (void)subscribePresence:(NSString *)jid
 {
     if (!_client || !jid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
     snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
     snprintf(p->state, sizeof p->state, "subscribe");
@@ -1000,6 +1239,10 @@ static void action_send_chatstate(wa_client *c, void *ctx)
 - (void)unsubscribePresence:(NSString *)jid
 {
     if (!_client || !jid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
     snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
     snprintf(p->state, sizeof p->state, "unsubscribe");
@@ -1009,6 +1252,10 @@ static void action_send_chatstate(wa_client *c, void *ctx)
 - (void)sendChatState:(BOOL)composing toJID:(NSString *)jid
 {
     if (!_client || !jid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
     snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
     snprintf(p->state, sizeof p->state, "%s", composing ? "composing" : "paused");
@@ -1034,6 +1281,10 @@ static void action_send_recording_state(wa_client *c, void *ctx)
 - (void)sendRecordingState:(BOOL)recording toJID:(NSString *)jid
 {
     if (!_client || !jid.length) return;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *pn = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        if (pn.length) jid = pn;
+    }
     wa_presence_ctx *p = (wa_presence_ctx *)calloc(1, sizeof *p);
     snprintf(p->jid, sizeof p->jid, "%s", jid.UTF8String);
     snprintf(p->state, sizeof p->state, "%s", recording ? "recording" : "paused");

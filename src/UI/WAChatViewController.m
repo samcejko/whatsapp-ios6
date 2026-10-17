@@ -337,6 +337,16 @@
         [av show];
         return;
     }
+    // If already recording (tap-to-record mode), don't restart on touch-down; micTouchUpInside will finish & send.
+    if (self.isRecordingVoice) {
+        return;
+    }
+
+    NSError *sessErr = nil;
+    AVAudioSession *sess = [AVAudioSession sharedInstance];
+    [sess setCategory:AVAudioSessionCategoryPlayAndRecord error:&sessErr];
+    [sess setActive:YES error:&sessErr];
+
     self.isRecordingVoice = YES;
     self.field.placeholder = WALoc(@"recording");
     [[WASession shared] sendRecordingState:YES toJID:self.jid];
@@ -360,6 +370,7 @@
     NSError *err = nil;
     self.recorder = [[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:self.recordFilePath] settings:settings error:&err];
     self.recorder.delegate = self;
+    [self.recorder prepareToRecord];
     [self.recorder record];
 }
 
@@ -372,7 +383,16 @@
 - (void)micTouchUpInside
 {
     if (!self.isRecordingVoice) return;
+    NSTimeInterval dur = [NSDate timeIntervalSinceReferenceDate] - self.recordStartTime;
+    // If user did a quick tap (< 0.6s), keep recording in tap-to-record mode until they tap again to send!
+    if (dur < 0.6) {
+        [self.micBtn setTitle:@"⬆️" forState:UIControlStateNormal];
+        self.field.placeholder = @"🔴  0:00  (Tap ⬆️ to send)";
+        return;
+    }
+
     self.isRecordingVoice = NO;
+    [self.micBtn setTitle:@"🎤" forState:UIControlStateNormal];
     [self.recordTimer invalidate];
     self.recordTimer = nil;
     [self.recorder stop];
@@ -380,17 +400,15 @@
     [[WASession shared] sendRecordingState:NO toJID:self.jid];
     self.field.placeholder = WALoc(@"message_hint");
 
-    NSTimeInterval dur = [NSDate timeIntervalSinceReferenceDate] - self.recordStartTime;
-    if (dur >= 1.0 && self.recordMsgId.length) {
+    NSData *audioData = self.recordFilePath.length ? [NSData dataWithContentsOfFile:self.recordFilePath] : nil;
+    if (dur >= 0.6 && self.recordMsgId.length && audioData.length > 100) {
         NSString *mid = self.recordMsgId;
         uint32_t secs = (uint32_t)ceil(dur);
+        if (secs < 1) secs = 1;
         [[WAChatStore shared] recordOutgoingAudioDuration:secs toJID:self.jid msgId:mid status:WAMessageStatusPending];
-        NSData *audioData = [NSData dataWithContentsOfFile:self.recordFilePath];
-        if (audioData.length) {
-            [[WASession shared] sendAudio:audioData duration:secs toJID:self.jid msgId:mid];
-        }
+        [[WASession shared] sendAudio:audioData duration:secs toJID:self.jid msgId:mid];
         AudioServicesPlaySystemSound(1004);
-    } else {
+    } else if (self.recordFilePath.length) {
         [[NSFileManager defaultManager] removeItemAtPath:self.recordFilePath error:nil];
     }
     self.recordMsgId = nil;
@@ -400,6 +418,7 @@
 {
     if (!self.isRecordingVoice) return;
     self.isRecordingVoice = NO;
+    [self.micBtn setTitle:@"🎤" forState:UIControlStateNormal];
     [self.recordTimer invalidate];
     self.recordTimer = nil;
     [self.recorder stop];

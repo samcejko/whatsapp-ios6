@@ -541,20 +541,76 @@ void wa_ws_close(wa_ws *ws)
 
 // Shared HTTPS GET: fetches host/path into `out` (raw body bytes, binary-safe, no trailing NUL counted in out->len).
 // Returns the HTTP status (> 0) or -1. The caller owns `out`.
-static int https_fetch(const char *host, const char *path, const char *ca_file, int timeout_ms, wa_buf *out)
+static int https_fetch(const char *initial_host, const char *initial_path, const char *ca_file, int timeout_ms, wa_buf *out)
 {
-    char err[160];
-    wa_ws *c = connect_tls(host, 443, ca_file, timeout_ms, err, sizeof err);
-    if (!c) { wa_log("https %s: %s", host, err); return -1; }
-    char req[1024];
-    snprintf(req, sizeof req,
-             "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-             "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
-             path, host);
-    char head[4096];
-    int st = -1;
-    if (tls_write_all(c, (const uint8_t *)req, strlen(req)) == 0) st = read_http_head(c, timeout_ms, head, sizeof head);
-    if (st > 0) {
+    char cur_host[256];
+    char cur_path[2048];
+    snprintf(cur_host, sizeof cur_host, "%s", initial_host);
+    snprintf(cur_path, sizeof cur_path, "%s", initial_path);
+
+    int max_redirects = 5;
+    for (int redir = 0; redir <= max_redirects; redir++) {
+        char err[160];
+        wa_ws *c = connect_tls(cur_host, 443, ca_file, timeout_ms, err, sizeof err);
+        if (!c) { wa_log("https %s: %s", cur_host, err); return -1; }
+        char req[3072];
+        snprintf(req, sizeof req,
+                 "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+                 cur_path, cur_host);
+        char head[4096];
+        int st = -1;
+        if (tls_write_all(c, (const uint8_t *)req, strlen(req)) == 0) st = read_http_head(c, timeout_ms, head, sizeof head);
+        if (st <= 0) {
+            c->closed = 1;
+            wa_ws_close(c);
+            return -1;
+        }
+
+        // Check for redirect (301, 302, 303, 307, 308)
+        if ((st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && redir < max_redirects) {
+            char loc[2048] = { 0 };
+            for (char *line = head; line && *line; ) {
+                char *nl = strstr(line, "\r\n");
+                if (nl) *nl = 0;
+#ifdef _WIN32
+                if (_strnicmp(line, "location:", 9) == 0) {
+#else
+                if (strncasecmp(line, "location:", 9) == 0) {
+#endif
+                    char *val = line + 9;
+                    while (*val == ' ' || *val == '\t') val++;
+                    snprintf(loc, sizeof loc, "%s", val);
+                    break;
+                }
+                line = nl ? nl + 2 : NULL;
+            }
+            c->closed = 1;
+            wa_ws_close(c);
+
+            if (loc[0]) {
+                wa_log("https: redirect %d -> %s", st, loc);
+                if (strncmp(loc, "https://", 8) == 0) {
+                    const char *p = loc + 8;
+                    const char *slash = strchr(p, '/');
+                    if (slash) {
+                        size_t hlen = (size_t)(slash - p);
+                        if (hlen < sizeof cur_host) {
+                            memcpy(cur_host, p, hlen);
+                            cur_host[hlen] = 0;
+                            snprintf(cur_path, sizeof cur_path, "%s", slash);
+                        }
+                    } else {
+                        snprintf(cur_host, sizeof cur_host, "%s", p);
+                        snprintf(cur_path, sizeof cur_path, "/");
+                    }
+                } else if (loc[0] == '/') {
+                    snprintf(cur_path, sizeof cur_path, "%s", loc);
+                }
+                continue;
+            }
+        }
+
         long clen = -1;
         int chunked = 0;
         for (char *line = head; line && *line; ) {
@@ -591,10 +647,11 @@ static int https_fetch(const char *host, const char *path, const char *ca_file, 
         } else {
             wa_buf_append(out, c->raw.data, c->raw.len);
         }
+        c->closed = 1;
+        wa_ws_close(c);
+        return st;
     }
-    c->closed = 1;
-    wa_ws_close(c);
-    return st;
+    return -1;
 }
 
 char *wa_https_get(const char *host, const char *path, const char *ca_file, int timeout_ms, int *status)

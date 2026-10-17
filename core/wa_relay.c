@@ -5,15 +5,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void store_token(uint8_t (*arr)[64], size_t *lens, int *count, int cap, int id, const uint8_t *data, size_t len)
+static void store_token(uint8_t (*arr)[256], size_t *lens, int *count, int cap, int id, const uint8_t *data, size_t len)
 {
-    if (id < 0 || id >= cap || len > 64) return;
+    if (id < 0 || id >= cap || len > 256) return;
     memcpy(arr[id], data, len);
     lens[id] = len;
     if (id + 1 > *count) *count = id + 1;
 }
 
-static void parse_indexed(const wa_node *relay, const char *tag, uint8_t (*arr)[64], size_t *lens, int *count, int cap)
+static void parse_indexed(const wa_node *relay, const char *tag, uint8_t (*arr)[256], size_t *lens, int *count, int cap)
 {
     int auto_id = 0;
     for (int i = 0; i < relay->nchildren; i++) {
@@ -45,7 +45,15 @@ int wa_relay_parse(const wa_node *relay, wa_relay_data *out)
     parse_indexed(relay, "auth_token", out->auth_tokens, out->auth_token_len, &out->nauth_tokens, WA_RELAY_MAX_TOKENS);
 
     wa_node *hk = wa_node_child(relay, "hbh_key");
-    if (hk && hk->has_content) out->has_hbh_key = decode_hbh(hk->content, hk->content_len, out->hbh_key);
+    if (!hk) hk = wa_node_child(relay, "key");
+    if (hk && hk->has_content) {
+        out->has_hbh_key = decode_hbh(hk->content, hk->content_len, out->hbh_key);
+        if (hk->content_len <= sizeof out->relay_key) {
+            memcpy(out->relay_key, hk->content, hk->content_len);
+            out->relay_key_len = hk->content_len;
+            out->has_relay_key = 1;
+        }
+    }
     wa_node *wl = wa_node_child(relay, "warp_mi_tag_len");
     if (wl && wl->has_content) {
         char buf[16];
@@ -87,6 +95,10 @@ int wa_relay_parse(const wa_node *relay, wa_relay_data *out)
 const wa_relay_endpoint *wa_relay_pick_endpoint(const wa_relay_data *d, int inbound)
 {
     if (d->nendpoints == 0) return NULL;
+    // Prefer webClientRelayPort (3480) for linked companion devices to guarantee bidirectional media
+    for (int i = 0; i < d->nendpoints; i++) {
+        if (d->endpoints[i].port == 3480) return &d->endpoints[i];
+    }
     if (inbound) for (int i = 0; i < d->nendpoints; i++) if (d->endpoints[i].is_fna) return &d->endpoints[i];
     for (int i = 0; i < d->nendpoints; i++) if (!d->endpoints[i].is_fna) return &d->endpoints[i];
     return &d->endpoints[0];

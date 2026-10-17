@@ -103,6 +103,35 @@ void wa_stun_native_sender_sub(uint32_t ssrc, uint8_t out[5])
     wa_put_u32(out + 1, ssrc);
 }
 
+int wa_stun_build_wasm_allocate(wa_buf *out, const uint8_t tid[12],
+                                const uint8_t *token, size_t token_len,
+                                const char *ip, uint16_t port,
+                                const uint8_t *mi_key, size_t mi_key_len)
+{
+    wa_buf attrs;
+    wa_buf_init(&attrs);
+
+    if (token && token_len) {
+        wa_stun_put_attr(&attrs, WA_STUN_ATTR_RELAY_TOKEN, token, token_len);
+    }
+
+    uint8_t stream_desc[8] = { 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00 };
+    wa_stun_put_attr(&attrs, 0x4024, stream_desc, sizeof stream_desc);
+
+    if (ip && port) {
+        uint8_t xend[8];
+        xend[0] = 0x00;
+        xend[1] = 0x01;
+        if (wa_stun_xor_endpoint(ip, port, xend + 2) == 0) {
+            wa_stun_put_attr(&attrs, 0x0016, xend, 8);
+        }
+    }
+
+    int rc = wa_stun_encode_request(out, WA_STUN_ALLOCATE_REQUEST, tid, attrs.data, attrs.len, mi_key, mi_key_len, 1);
+    wa_buf_free(&attrs);
+    return rc;
+}
+
 int wa_stun_is_stun(const uint8_t *data, size_t len)
 {
     return len >= 20 && (data[0] & 0xc0) == 0 && wa_get_u32(data + 4) == STUN_MAGIC;

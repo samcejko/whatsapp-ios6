@@ -9,6 +9,7 @@
 #include "wa_net.h"
 #include "wa_crypto.h"
 #include "wa_proto.h"
+#include "opus.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -107,6 +108,9 @@ int wa_chat_send_message_payload(wa_client *c, wa_sess_store *sessions, const ch
                 }
             }
         }
+    } else if (strstr(to_user_jid, "@lid")) {
+        dest_user = to_user_jid;
+        if (recip.pn[0]) peer_recipient_pn = recip.pn;
     }
 
     wa_device *d = wa_client_device(c);
@@ -388,6 +392,160 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
     return rc;
 }
 
+static uint32_t ogg_crc32(const uint8_t *data, size_t len)
+{
+    uint32_t crc = 0;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= (uint32_t)data[i] << 24;
+        for (int b = 0; b < 8; b++) {
+            if (crc & 0x80000000u) crc = (crc << 1) ^ 0x04C11DB7u;
+            else crc <<= 1;
+        }
+    }
+    return crc;
+}
+
+static void ogg_put_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+static void ogg_put_le32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+    p[2] = (uint8_t)((v >> 16) & 0xFF);
+    p[3] = (uint8_t)((v >> 24) & 0xFF);
+}
+
+static void ogg_put_le64(uint8_t *p, uint64_t v)
+{
+    ogg_put_le32(p, (uint32_t)(v & 0xFFFFFFFFu));
+    ogg_put_le32(p + 4, (uint32_t)(v >> 32));
+}
+
+static void ogg_write_page(wa_buf *out, uint8_t hdr_type, uint64_t granule, uint32_t serial, uint32_t seq,
+                           const uint8_t *pkt, size_t pkt_len)
+{
+    uint8_t segs[256];
+    int nsegs = 0;
+    size_t rem = pkt_len;
+    while (rem >= 255 && nsegs < 254) {
+        segs[nsegs++] = 255;
+        rem -= 255;
+    }
+    segs[nsegs++] = (uint8_t)rem;
+
+    size_t page_start = out->len;
+    uint8_t hdr[27];
+    memcpy(hdr, "OggS", 4);
+    hdr[4] = 0; // version
+    hdr[5] = hdr_type;
+    ogg_put_le64(hdr + 6, granule);
+    ogg_put_le32(hdr + 14, serial);
+    ogg_put_le32(hdr + 18, seq);
+    ogg_put_le32(hdr + 22, 0); // CRC placeholder
+    hdr[26] = (uint8_t)nsegs;
+
+    wa_buf_append(out, hdr, 27);
+    wa_buf_append(out, segs, (size_t)nsegs);
+    if (pkt && pkt_len) wa_buf_append(out, pkt, pkt_len);
+
+    uint32_t crc = ogg_crc32(out->data + page_start, out->len - page_start);
+    ogg_put_le32(out->data + page_start + 22, crc);
+}
+
+static int wav_to_ogg_opus(const uint8_t *wav, size_t wav_len, wa_buf *ogg_out, uint32_t *out_seconds)
+{
+    if (!wav || wav_len < 44 || memcmp(wav, "RIFF", 4) != 0 || memcmp(wav + 8, "WAVE", 4) != 0)
+        return -1;
+    uint32_t sr = 16000;
+    uint16_t ch = 1, bps = 16;
+    const uint8_t *pcm_bytes = NULL;
+    size_t pcm_len = 0;
+
+    size_t off = 12;
+    while (off + 8 <= wav_len) {
+        uint32_t cid = (uint32_t)wav[off] | ((uint32_t)wav[off+1]<<8) | ((uint32_t)wav[off+2]<<16) | ((uint32_t)wav[off+3]<<24);
+        uint32_t csz = (uint32_t)wav[off+4] | ((uint32_t)wav[off+5]<<8) | ((uint32_t)wav[off+6]<<16) | ((uint32_t)wav[off+7]<<24);
+        off += 8;
+        if (off + csz > wav_len) csz = (uint32_t)(wav_len - off);
+        if (cid == 0x20746D66u && csz >= 16) { // "fmt "
+            ch  = (uint16_t)(wav[off+2] | (wav[off+3]<<8));
+            sr  = (uint32_t)wav[off+4] | ((uint32_t)wav[off+5]<<8) | ((uint32_t)wav[off+6]<<16) | ((uint32_t)wav[off+7]<<24);
+            bps = (uint16_t)(wav[off+14] | (wav[off+15]<<8));
+        } else if (cid == 0x61746164u) { // "data"
+            pcm_bytes = wav + off;
+            pcm_len = csz;
+            break;
+        }
+        off += csz + (csz & 1);
+    }
+    if (!pcm_bytes || pcm_len < 64 || bps != 16) return -1;
+    if (sr != 8000 && sr != 12000 && sr != 16000 && sr != 24000 && sr != 48000) sr = 16000;
+
+    int err = 0;
+    OpusEncoder *enc = opus_encoder_create((opus_int32)sr, 1, OPUS_APPLICATION_VOIP, &err);
+    if (!enc || err != OPUS_OK) return -1;
+    opus_encoder_ctl(enc, OPUS_SET_BITRATE(24000));
+    opus_encoder_ctl(enc, OPUS_SET_VBR(1));
+    opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+
+    uint32_t serial = 0x57415A36u;
+    wa_random((uint8_t *)&serial, 4);
+    uint32_t seq = 0;
+
+    // Page 0: OpusHead (19 bytes)
+    uint8_t head[19];
+    memcpy(head, "OpusHead", 8);
+    head[8] = 1; // version
+    head[9] = 1; // mono
+    ogg_put_le16(head + 10, 312); // pre-skip (48kHz samples)
+    ogg_put_le32(head + 12, sr);
+    ogg_put_le16(head + 16, 0);   // output gain
+    head[18] = 0;                 // channel mapping family
+    ogg_write_page(ogg_out, 0x02, 0, serial, seq++, head, sizeof head);
+
+    // Page 1: OpusTags (22 bytes)
+    uint8_t tags[22];
+    memcpy(tags, "OpusTags", 8);
+    ogg_put_le32(tags + 8, 6);
+    memcpy(tags + 12, "Wazzup", 6);
+    ogg_put_le32(tags + 18, 0);
+    ogg_write_page(ogg_out, 0x00, 0, serial, seq++, tags, sizeof tags);
+
+    size_t total_frames = pcm_len / (2 * (ch > 0 ? ch : 1));
+    size_t frame_samples = sr / 50; // 20 ms
+    uint64_t granule = 312;
+    int16_t mono_frame[960];
+    uint8_t opus_pkt[400];
+
+    for (size_t pos = 0; pos < total_frames; pos += frame_samples) {
+        size_t take = (pos + frame_samples <= total_frames) ? frame_samples : (total_frames - pos);
+        for (size_t i = 0; i < take; i++) {
+            size_t b_idx = (pos + i) * 2 * (ch > 0 ? ch : 1);
+            mono_frame[i] = (int16_t)((uint16_t)pcm_bytes[b_idx] | ((uint16_t)pcm_bytes[b_idx + 1] << 8));
+        }
+        if (take < frame_samples) {
+            memset(mono_frame + take, 0, (frame_samples - take) * sizeof(int16_t));
+        }
+        int n = opus_encode(enc, mono_frame, (int)frame_samples, opus_pkt, sizeof opus_pkt);
+        if (n <= 0) break;
+        granule += 960; // 20 ms in 48 kHz granule units
+        int is_last = (pos + frame_samples >= total_frames);
+        ogg_write_page(ogg_out, is_last ? 0x04 : 0x00, granule, serial, seq++, opus_pkt, (size_t)n);
+    }
+    opus_encoder_destroy(enc);
+
+    if (out_seconds) {
+        uint32_t sec = (uint32_t)((total_frames + sr / 2) / sr);
+        if (sec < 1) sec = 1;
+        *out_seconds = sec;
+    }
+    return ogg_out->len > 64 ? 0 : -1;
+}
+
 int wa_chat_send_audio(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
                        const uint8_t *audio, size_t audio_len,
                        uint32_t seconds, const char *mimetype,
@@ -395,24 +553,45 @@ int wa_chat_send_audio(wa_client *c, wa_sess_store *sessions, const char *to_use
 {
     if (!c || !sessions || !to_user_jid || !audio || !audio_len) return -1;
 
+    wa_buf ogg_buf;
+    wa_buf_init(&ogg_buf);
+    const uint8_t *upload_bytes = audio;
+    size_t upload_len = audio_len;
+    const char *final_mime = (mimetype && mimetype[0]) ? mimetype : "audio/ogg; codecs=opus";
+
+    if (audio_len >= 44 && memcmp(audio, "RIFF", 4) == 0) {
+        uint32_t calc_sec = seconds;
+        if (wav_to_ogg_opus(audio, audio_len, &ogg_buf, &calc_sec) == 0) {
+            upload_bytes = ogg_buf.data;
+            upload_len = ogg_buf.len;
+            final_mime = "audio/ogg; codecs=opus";
+            if (seconds == 0 || calc_sec > 0) seconds = calc_sec;
+            wa_log("chat: encoded WAV (%u B) -> Ogg Opus (%u B, %u s)", (unsigned)audio_len, (unsigned)upload_len, (unsigned)seconds);
+        }
+    }
+
     uint8_t media_key[32], file_sha[32], file_enc_sha[32];
     char direct_path[256] = { 0 }, media_url[512] = { 0 };
-    if (upload_media_blob(c, audio, audio_len, "WhatsApp Audio Keys", "audio",
-                          media_key, file_sha, file_enc_sha,
-                          direct_path, sizeof direct_path, media_url, sizeof media_url) != 0)
+    int up_rc = upload_media_blob(c, upload_bytes, upload_len, "WhatsApp Audio Keys", "audio",
+                                  media_key, file_sha, file_enc_sha,
+                                  direct_path, sizeof direct_path, media_url, sizeof media_url);
+    if (up_rc != 0) {
+        wa_buf_free(&ogg_buf);
         return -1;
+    }
 
     wa_buf aud;
     wa_buf_init(&aud);
     if (media_url[0]) pb_put_string(&aud, 1, media_url);
-    pb_put_string(&aud, 2, (mimetype && mimetype[0]) ? mimetype : "audio/mp4");
+    pb_put_string(&aud, 2, final_mime);
     pb_put_bytes(&aud, 3, file_sha, 32);
-    pb_put_varint(&aud, 4, (uint64_t)audio_len);
+    pb_put_varint(&aud, 4, (uint64_t)upload_len);
     pb_put_varint(&aud, 5, (uint64_t)(seconds > 0 ? seconds : 1));
     pb_put_varint(&aud, 6, 1); // ptt = true
     pb_put_bytes(&aud, 7, media_key, 32);
     pb_put_bytes(&aud, 8, file_enc_sha, 32);
     pb_put_string(&aud, 9, direct_path);
+    wa_buf_free(&ogg_buf);
 
     wa_buf msg;
     wa_buf_init(&msg);
@@ -451,6 +630,59 @@ static void send_delivery_receipt(wa_client *c, const char *to, const char *msg_
     if (participant && participant[0]) wa_node_attr(r, "participant", participant);
     wa_client_send(c, r);
     wa_node_free(r);
+}
+
+// Send a Signal retry receipt with fresh keys when decryption fails so the sender immediately re-establishes session
+static void send_retry_receipt(wa_client *c, const wa_node *message, const char *from, const char *msg_id, const char *participant)
+{
+    if (!c || !from || !msg_id) return;
+    wa_device *d = wa_client_device(c);
+    if (!d) return;
+
+    wa_node *r = wa_node_new("receipt");
+    wa_node_attr(r, "to", from);
+    wa_node_attr(r, "id", msg_id);
+    wa_node_attr(r, "type", "retry");
+    if (participant && participant[0]) wa_node_attr(r, "participant", participant);
+
+    const char *t_str = wa_node_get(message, "t");
+    wa_node *retry = wa_node_add_new(r, "retry");
+    wa_node_attr(retry, "v", "1");
+    wa_node_attr(retry, "count", "1");
+    wa_node_attr(retry, "id", msg_id);
+    wa_node_attr(retry, "t", (t_str && t_str[0]) ? t_str : "0");
+
+    uint8_t reg_be[4];
+    wa_put_u32(reg_be, d->registration_id);
+    wa_node_set_bytes(wa_node_add_new(r, "registration"), reg_be, 4);
+
+    wa_node *keys = wa_node_add_new(r, "keys");
+    uint8_t ktype = 5;
+    wa_node_set_bytes(wa_node_add_new(keys, "type"), &ktype, 1);
+    wa_node_set_bytes(wa_node_add_new(keys, "identity"), d->identity_key.pub, 32);
+
+    if (d->n_prekeys > 0) {
+        wa_node *key = wa_node_add_new(keys, "key");
+        uint32_t pk_id = d->prekeys[0].id;
+        uint8_t pk_id3[3] = { (uint8_t)(pk_id >> 16), (uint8_t)(pk_id >> 8), (uint8_t)pk_id };
+        wa_node_set_bytes(wa_node_add_new(key, "id"), pk_id3, 3);
+        wa_node_set_bytes(wa_node_add_new(key, "value"), d->prekeys[0].pair.pub, 32);
+    }
+
+    wa_node *skey = wa_node_add_new(keys, "skey");
+    uint32_t sk_id = d->signed_pre_key_id;
+    uint8_t sk_id3[3] = { (uint8_t)(sk_id >> 16), (uint8_t)(sk_id >> 8), (uint8_t)sk_id };
+    wa_node_set_bytes(wa_node_add_new(skey, "id"), sk_id3, 3);
+    wa_node_set_bytes(wa_node_add_new(skey, "value"), d->signed_pre_key.pub, 32);
+    wa_node_set_bytes(wa_node_add_new(skey, "signature"), d->signed_pre_key_sig, 64);
+
+    if (d->account_len > 0) {
+        wa_node_set_bytes(wa_node_add_new(keys, "device-identity"), d->account, d->account_len);
+    }
+
+    wa_client_send(c, r);
+    wa_node_free(r);
+    wa_log("chat: sent retry receipt (with keys) for id=%s to=%s", msg_id, from);
 }
 
 int wa_chat_handle_message_full(wa_client *c, wa_sess_store *sessions, const wa_node *message,
@@ -544,7 +776,10 @@ int wa_chat_handle_message_full(wa_client *c, wa_sess_store *sessions, const wa_
         // Send delivery receipt back to sender only when decryption succeeded
         send_delivery_receipt(c, in.from, in.id, part);
     } else {
-        wa_log("chat: decrypt failed (rc=%d) from=%s id=%s type=%s", rc, in.from, in.id ? in.id : "?", in.enc_type);
+        wa_log("chat: decrypt failed (rc=%d) from=%s id=%s type=%s; deleting session & sending retry",
+               rc, in.from, in.id ? in.id : "?", in.enc_type);
+        wa_sess_del(sessions, sender_dev_jid);
+        send_retry_receipt(c, message, in.from, in.id, part);
     }
 
     wa_buf_free(&msg);

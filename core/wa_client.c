@@ -13,10 +13,11 @@
 #include <pthread.h>
 #endif
 
-#define WA_MAX_PENDING 8
-#define WA_MAX_ACTIONS 32
+#define WA_MAX_PENDING 16
+#define WA_MAX_ACTIONS 256
 
 #define KEEPALIVE_MS 25000
+#define RECV_TIMEOUT_MS 50000
 #define QR_ROTATE_MS 20000
 #define QR_FIRST_MS 60000
 
@@ -38,6 +39,7 @@ struct wa_client {
     uint64_t next_qr_us;
 
     uint64_t last_send_us;
+    uint64_t last_recv_us;
     uint32_t id_counter;
     char error[192];
 
@@ -558,23 +560,25 @@ int wa_client_connect(wa_client *c)
     c->state = WA_CONNECTING;
     c->reconnect_wanted = 0;
     c->prekeys_sent = 0;
+    wa_buf_clear(&c->inbuf);
     char err[192];
     c->ws = wa_ws_open(c->cfg.host, 443, c->cfg.path, c->cfg.origin,
                        c->cfg.verify_tls ? c->cfg.ca_file : NULL, 15000, err, sizeof err);
     if (!c->ws) {
         set_err(c, "%s", err);
         c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, 0);
+        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->dev->registered ? 1 : 0);
         return -1;
     }
     if (do_handshake(c) != 0) {
         wa_ws_close(c->ws);
         c->ws = NULL;
         c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, 0);
+        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->dev->registered ? 1 : 0);
         return -1;
     }
     c->last_send_us = wa_now_us();
+    c->last_recv_us = c->last_send_us;
     return 0;
 }
 
@@ -649,7 +653,10 @@ wa_node *wa_client_request_sync(wa_client *c, wa_node *iq, int timeout_ms)
         if (done) break;
         int r = wa_ws_read(c->ws, &c->inbuf, 200);
         if (r < 0) break;
-        if (r > 0 && process_frames(c) != 0) break;
+        if (r > 0) {
+            c->last_recv_us = wa_now_us();
+            if (process_frames(c) != 0) break;
+        }
     }
     wc_lock(c);
     c->pending[slot].used = 0;
@@ -666,13 +673,16 @@ wa_client_state wa_client_poll(wa_client *c, int timeout_ms)
     if (r < 0) {
         set_err(c, "%s", wa_ws_error(c->ws));
         c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->reconnect_wanted);
+        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, (c->reconnect_wanted || c->dev->registered) ? 1 : 0);
         return WA_DISCONNECTED;
     }
-    if (r > 0 && process_frames(c) != 0) {
-        c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, 0);
-        return WA_DISCONNECTED;
+    if (r > 0) {
+        c->last_recv_us = wa_now_us();
+        if (process_frames(c) != 0) {
+            c->state = WA_DISCONNECTED;
+            if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, (c->reconnect_wanted || c->dev->registered) ? 1 : 0);
+            return WA_DISCONNECTED;
+        }
     }
     uint64_t now = wa_now_us();
     // rotate the QR ref while pairing
@@ -684,7 +694,15 @@ wa_client_state wa_client_poll(wa_client *c, int timeout_ms)
             if (qr) { c->cb.on_qr(c->cb.ctx, qr); free(qr); }
         }
     }
-    if (c->state == WA_CONNECTED && now - c->last_send_us >= KEEPALIVE_MS * 1000ull) send_keepalive(c);
+    if (c->state == WA_CONNECTED) {
+        if (now - c->last_recv_us >= RECV_TIMEOUT_MS * 1000ull) {
+            set_err(c, "keepalive timeout");
+            c->state = WA_DISCONNECTED;
+            if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, 1);
+            return WA_DISCONNECTED;
+        }
+        if (now - c->last_send_us >= KEEPALIVE_MS * 1000ull) send_keepalive(c);
+    }
     if (c->reconnect_wanted) return WA_DISCONNECTED;   // caller reconnects
     return c->state;
 }
@@ -706,8 +724,10 @@ void wa_client_run(wa_client *c)
         }
         if (c->ws) { wa_ws_close(c->ws); c->ws = NULL; }
         if (c->stop) { if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error[0] ? c->error : "stopped", 0); return; }
-        if (!c->reconnect_wanted) return;
+        if (!c->reconnect_wanted && !c->dev->registered) return;
+        int fast = c->reconnect_wanted;
         c->reconnect_wanted = 0;
-        wa_sleep_ms(500);
+        wa_log("client disconnected (%s); auto-reconnecting in %dms", c->error[0] ? c->error : "socket closed", fast ? 500 : 2000);
+        wa_sleep_ms(fast ? 500 : 2000);
     }
 }

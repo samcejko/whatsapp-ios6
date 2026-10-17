@@ -22,6 +22,7 @@ wa_node *wa_user_build_devices_iq(const char *const *user_jids, int n, const cha
     wa_node *query = wa_node_add_new(usync, "query");
     wa_node_attr(wa_node_add_new(query, "devices"), "version", "2");
     wa_node_add_new(query, "lid");
+    wa_node_add_new(query, "pn");
     wa_node *list = wa_node_add_new(usync, "list");
     for (int i = 0; i < n; i++) {
         wa_node *u = wa_node_add_new(list, "user");
@@ -52,6 +53,17 @@ int wa_user_parse_devices(const wa_node *iq_result, wa_device_list *out)
             if (lval && lval[0]) {
                 if (strchr(lval, '@')) snprintf(out->lid, sizeof out->lid, "%s", lval);
                 else snprintf(out->lid, sizeof out->lid, "%s@lid", lval);
+            }
+        }
+
+        // Parse <pn val="..."/> if present
+        const wa_node *pn_node = wa_node_find(user, "pn");
+        if (pn_node) {
+            const char *pval = wa_node_get(pn_node, "val");
+            if (!pval) pval = wa_node_get(pn_node, "jid");
+            if (pval && pval[0]) {
+                if (strchr(pval, '@')) snprintf(out->pn, sizeof out->pn, "%s", pval);
+                else snprintf(out->pn, sizeof out->pn, "%s@s.whatsapp.net", pval);
             }
         }
 

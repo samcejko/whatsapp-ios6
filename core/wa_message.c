@@ -219,6 +219,7 @@ wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_deven
     wa_node_attr(m, "id", id);
     wa_node_attr(m, "type", "text");
     if (peer_recipient_pn && peer_recipient_pn[0]) {
+        wa_node_attr(m, "recipient_pn", peer_recipient_pn);
         wa_node_attr(m, "peer_recipient_pn", peer_recipient_pn);
     }
     wa_node *parts = wa_node_add_new(m, "participants");

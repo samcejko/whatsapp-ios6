@@ -31,14 +31,17 @@ typedef struct {
 typedef struct {
     wa_relay_endpoint endpoints[WA_RELAY_MAX_ENDPOINTS];
     int nendpoints;
-    uint8_t tokens[WA_RELAY_MAX_TOKENS][64];
+    uint8_t tokens[WA_RELAY_MAX_TOKENS][256];
     size_t token_len[WA_RELAY_MAX_TOKENS];
     int ntokens;
-    uint8_t auth_tokens[WA_RELAY_MAX_TOKENS][64];
+    uint8_t auth_tokens[WA_RELAY_MAX_TOKENS][256];
     size_t auth_token_len[WA_RELAY_MAX_TOKENS];
     int nauth_tokens;
     uint8_t hbh_key[30];
     int has_hbh_key;
+    uint8_t relay_key[32];
+    size_t relay_key_len;
+    int has_relay_key;
     uint32_t warp_mi_tag_len;    // 0 = absent (default 4)
 } wa_relay_data;
 

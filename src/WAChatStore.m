@@ -57,12 +57,7 @@ static BOOL g_storeInitializing = NO;
     if (!g_storeInitializing) {
         WAChatStore *s = [WAChatStore shared];
         if (s && s.chats) {
-            if (s.chats[digits]) return digits;
-            NSDictionary *lidToPn = s.chats[@"_lid_to_pn"];
-            NSDictionary *pnToLid = s.chats[@"_pn_to_lid"];
-            NSString *alt = [lidToPn isKindOfClass:[NSDictionary class]] ? lidToPn[digits] : nil;
-            if (!alt.length && [pnToLid isKindOfClass:[NSDictionary class]]) alt = pnToLid[digits];
-            if (alt.length && s.chats[alt]) return alt;
+            return [s keyFor:jid];
         }
     }
     return digits;
@@ -72,12 +67,29 @@ static BOOL g_storeInitializing = NO;
 {
     if (!jid.length) return @"";
     NSString *digits = [WAChatStore rawDigitsForJID:jid];
-    if (self.chats[digits]) return digits;
     NSDictionary *lidToPn = self.chats[@"_lid_to_pn"];
     NSDictionary *pnToLid = self.chats[@"_pn_to_lid"];
     NSString *alt = [lidToPn isKindOfClass:[NSDictionary class]] ? lidToPn[digits] : nil;
-    if (!alt.length && [pnToLid isKindOfClass:[NSDictionary class]]) alt = pnToLid[digits];
-    if (alt.length && self.chats[alt]) return alt;
+    NSString *lidKey = nil;
+    NSString *pnKey = nil;
+    if (alt.length) {
+        lidKey = digits;
+        pnKey = alt;
+    } else {
+        alt = [pnToLid isKindOfClass:[NSDictionary class]] ? pnToLid[digits] : nil;
+        if (alt.length) {
+            lidKey = alt;
+            pnKey = digits;
+        }
+    }
+    if (lidKey.length && pnKey.length) {
+        if (self.chats[lidKey] && self.chats[pnKey]) {
+            [self mergeDuplicateChatFromKey:pnKey intoKey:lidKey];
+        }
+        if (self.chats[lidKey]) return lidKey;
+        if (self.chats[pnKey]) return pnKey;
+        return lidKey;
+    }
     return digits;
 }
 

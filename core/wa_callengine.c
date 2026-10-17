@@ -202,6 +202,50 @@ int wa_callengine_reject(wa_client *c, const wa_call_state *st)
     return rc;
 }
 
+int wa_callengine_on_relay(const wa_node *call, wa_call_state *st)
+{
+    if (!call || !st) return 0;
+    const wa_node *relay_node = wa_node_find(call, "relay");
+    if (!relay_node) {
+        const wa_node *trans = wa_node_find(call, "transport");
+        if (trans) relay_node = wa_node_find(trans, "relay");
+    }
+    if (!relay_node) {
+        relay_node = wa_node_find(call, "relaylatency");
+    }
+    if (!relay_node) return 0;
+
+    if (wa_relay_parse(relay_node, &st->relay)) {
+        st->has_relay = 1;
+        wa_log("callengine: parsed relay info (%d endpoints, %d tokens, hbh_key=%d, relay_key=%d)",
+               st->relay.nendpoints, st->relay.ntokens, st->relay.has_hbh_key, st->relay.has_relay_key);
+        return 1;
+    }
+    return 0;
+}
+
+int wa_callengine_setup_srtp(wa_call_state *st, const char *self_lid, const char *peer_lid)
+{
+    if (!st || !self_lid || !peer_lid) return -1;
+    if (wa_srtp_derive_e2e(&st->send_keys, st->call_key, sizeof st->call_key, self_lid) != 0) return -1;
+    if (wa_srtp_derive_e2e(&st->recv_keys, st->call_key, sizeof st->call_key, peer_lid) != 0) return -1;
+
+    uint8_t ssrc_bytes[8];
+    wa_random(ssrc_bytes, sizeof ssrc_bytes);
+    st->send_ssrc = wa_get_u32(ssrc_bytes);
+    if (st->send_ssrc == 0) st->send_ssrc = 0x57410001u;
+    st->recv_ssrc = wa_get_u32(ssrc_bytes + 4);
+    if (st->recv_ssrc == 0) st->recv_ssrc = 0x57410002u;
+
+    st->rtp_seq = (uint16_t)(st->send_ssrc & 0xFFFF);
+    st->rtp_ts = st->send_ssrc * 320;
+    memset(&st->roc_send, 0, sizeof st->roc_send);
+    memset(&st->roc_recv, 0, sizeof st->roc_recv);
+    st->srtp_ready = 1;
+    wa_log("callengine: SRTP ready (send_ssrc=0x%08x, recv_ssrc=0x%08x)", (unsigned)st->send_ssrc, (unsigned)st->recv_ssrc);
+    return 0;
+}
+
 int wa_callengine_terminate(wa_client *c, const wa_call_state *st, const char *reason)
 {
     wa_node *n = wa_call_build_terminate(st->call_id, st->peer, st->peer, reason);
