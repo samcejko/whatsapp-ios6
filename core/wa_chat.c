@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 static void our_identity(wa_client *c, wa_sig_keypair *out)
 {
@@ -217,7 +218,7 @@ int wa_chat_send_reaction(wa_client *c, wa_sess_store *sessions, const char *to_
     if (!c || !sessions || !to_user_jid || !target_msg_id) return -1;
     wa_buf pt;
     wa_buf_init(&pt);
-    int64_t ts_ms = (int64_t)wa_now_sec() * 1000LL;
+    int64_t ts_ms = (int64_t)time(NULL) * 1000LL;
     if (wa_msg_reaction_plaintext(target_msg_id, to_user_jid, target_from_me, emoji, ts_ms, &pt) != 0) {
         wa_buf_free(&pt);
         return -1;
