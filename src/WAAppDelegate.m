@@ -11,6 +11,8 @@
 #import "UI/WAMediaGalleryViewController.h"
 #import "UI/WACallViewController.h"
 #import "UI/WAContactInfoViewController.h"
+#import "UI/WAStatusViewerViewController.h"
+#import "UI/WABroadcastPickerViewController.h"
 #import "WAChatStore.h"
 #import <QuartzCore/QuartzCore.h>
 #import <AddressBook/AddressBook.h>
@@ -126,6 +128,47 @@
         [nav popToRootViewControllerAnimated:NO];
         [nav pushViewController:[[WASettingsViewController alloc] init] animated:NO];
         return YES;
+    }
+    if ([cmd isEqualToString:@"tab"]) {
+        NSString *idxStr = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2 && [p[0] isEqualToString:@"index"]) idxStr = p[1];
+        }
+        if (idxStr.length && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+            UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+            [nav popToRootViewControllerAnimated:NO];
+            if ([nav.topViewController isKindOfClass:[WAChatsViewController class]]) {
+                WAChatsViewController *chats = (WAChatsViewController *)nav.topViewController;
+                chats.navSegment.selectedSegmentIndex = [idxStr integerValue];
+                [chats onSegmentChanged];
+            }
+            return YES;
+        }
+    }
+    if ([cmd isEqualToString:@"status-viewer"]) {
+        if ([self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+            UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+            [nav popToRootViewControllerAnimated:NO];
+            WAStatusViewerViewController *sv = [[WAStatusViewerViewController alloc] initWithContactName:@"mamca💙" jid:@"420773047722@s.whatsapp.net" timeText:@"Před 15 min" text:@"Užíváme si krásné odpoledne na zahradě! ☀️🌸" image:nil];
+            sv.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+            [nav presentViewController:sv animated:NO completion:nil];
+            return YES;
+        }
+    }
+    if ([cmd isEqualToString:@"broadcast"]) {
+        if ([self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+            UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
+            [nav popToRootViewControllerAnimated:NO];
+            WABroadcastPickerViewController *bp = [[WABroadcastPickerViewController alloc] init];
+            UINavigationController *bnav = [[UINavigationController alloc] initWithRootViewController:bp];
+            [WATheme styleNavigationBar:bnav.navigationBar];
+            if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                bnav.modalPresentationStyle = UIModalPresentationFormSheet;
+            }
+            [nav presentViewController:bnav animated:NO completion:nil];
+            return YES;
+        }
     }
     if ([cmd isEqualToString:@"info"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
         NSString *jid = nil;
