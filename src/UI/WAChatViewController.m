@@ -450,9 +450,35 @@
             lastDay = day;
         }
         NSMutableDictionary *d = [m mutableCopy];
+        if (self.isGroup && ![m[@"out"] boolValue]) {
+            NSString *rawSender = m[@"sender"];
+            if ([rawSender isKindOfClass:[NSString class]] && rawSender.length) {
+                NSString *sJid = ([rawSender rangeOfString:@"@"].location != NSNotFound) ? rawSender : [rawSender stringByAppendingString:@"@lid"];
+                NSString *resolvedSender = WADisplayNameForChat(sJid, nil);
+                if (resolvedSender.length) d[@"sender"] = resolvedSender;
+            }
+        } else {
+            [d removeObjectForKey:@"sender"];
+        }
         int kind = [m[@"kind"] intValue];
         NSString *label = [WAChatStore mediaLabelForKind:kind];
         NSString *text = m[@"text"];
+        if (text.length && [text rangeOfString:@"@"].location != NSNotFound) {
+            NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"@([0-9]{8,20})" options:0 error:nil];
+            NSArray *matches = [re matchesInString:text options:0 range:NSMakeRange(0, text.length)];
+            if (matches.count) {
+                NSMutableString *mutText = [text mutableCopy];
+                for (NSTextCheckingResult *res in [matches reverseObjectEnumerator]) {
+                    NSString *digits = [text substringWithRange:[res rangeAtIndex:1]];
+                    NSString *mName = [[WAChatStore shared] displayNameForJID:[digits stringByAppendingString:@"@lid"]];
+                    if (!mName.length) mName = [[WAChatStore shared] displayNameForJID:[digits stringByAppendingString:@"@s.whatsapp.net"]];
+                    if (mName.length) {
+                        [mutText replaceCharactersInRange:res.range withString:[@"@" stringByAppendingString:mName]];
+                    }
+                }
+                text = mutText;
+            }
+        }
         d[@"display"] = (text.length ? text : (label.length ? label : @""));
         NSData *thumb = m[@"thumb"];
         if ([thumb isKindOfClass:[NSData class]] && thumb.length) {

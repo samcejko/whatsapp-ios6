@@ -76,33 +76,31 @@
 
 + (UIImage *)bubbleOutgoing:(BOOL)outgoing
 {
-    CGFloat r = 15, tail = 7, w = 2 * r + tail + 4, h = 2 * r + 4;
+    CGFloat r = 11, tail = 7, w = 44, h = 36;
     UIGraphicsBeginImageContextWithOptions(CGSizeMake(w, h), NO, 0);
     CGContextRef c = UIGraphicsGetCurrentContext();
     UIColor *fill = outgoing ? [self outgoingBubble] : [self incomingBubble];
     CGRect body = outgoing ? CGRectMake(1, 1, w - tail - 2, h - 2) : CGRectMake(tail + 1, 1, w - tail - 2, h - 2);
     UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:body cornerRadius:r];
-    // tail
+    // tail at bottom corner (fully inside the bottom cap inset)
     UIBezierPath *t = [UIBezierPath bezierPath];
     if (outgoing) {
-        [t moveToPoint:CGPointMake(w - tail - 2, h - r)];
-        [t addLineToPoint:CGPointMake(w - 2, h - 6)];
-        [t addLineToPoint:CGPointMake(w - tail - 6, h - 4)];
+        [t moveToPoint:CGPointMake(w - tail - 2, h - 12)];
+        [t addLineToPoint:CGPointMake(w - 2, h - 5)];
+        [t addLineToPoint:CGPointMake(w - tail - 6, h - 3)];
     } else {
-        [t moveToPoint:CGPointMake(tail + 2, h - r)];
-        [t addLineToPoint:CGPointMake(2, h - 6)];
-        [t addLineToPoint:CGPointMake(tail + 6, h - 4)];
+        [t moveToPoint:CGPointMake(tail + 2, h - 12)];
+        [t addLineToPoint:CGPointMake(2, h - 5)];
+        [t addLineToPoint:CGPointMake(tail + 6, h - 3)];
     }
     [t closePath];
     [p appendPath:t];
     CGContextSaveGState(c);
     [p addClip];
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    // Robustly read RGBA: whiteColor et al. are in the grayscale space (2 components), so CGColorGetComponents
-    // would read out of bounds. getRed:…/getWhite:… normalise any UIColor to RGB.
     CGFloat rr, gg, bb, aa;
     if (![fill getRed:&rr green:&gg blue:&bb alpha:&aa]) { CGFloat ww = 1; [fill getWhite:&ww alpha:&aa]; rr = gg = bb = ww; }
-    CGFloat comps[8] = { MIN(rr + 0.04, 1), MIN(gg + 0.04, 1), MIN(bb + 0.04, 1), 1,
+    CGFloat comps[8] = { MIN(rr + 0.03, 1), MIN(gg + 0.03, 1), MIN(bb + 0.03, 1), 1,
                          rr, gg, bb, 1 };
     CGFloat locs[2] = { 0, 1 };
     CGGradientRef g = CGGradientCreateWithColorComponents(cs, comps, locs, 2);
@@ -115,8 +113,13 @@
     [p stroke];
     UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
-    CGFloat capL = outgoing ? r : r + tail, capR = outgoing ? r + tail : r;
-    return [img resizableImageWithCapInsets:UIEdgeInsetsMake(r, capL, r, capR)];
+    CGFloat capV = 14;
+    CGFloat capL = outgoing ? 14 : (14 + tail);
+    CGFloat capR = outgoing ? (14 + tail) : 14;
+    if ([img respondsToSelector:@selector(resizableImageWithCapInsets:resizingMode:)]) {
+        return [img resizableImageWithCapInsets:UIEdgeInsetsMake(capV, capL, capV, capR) resizingMode:UIImageResizingModeStretch];
+    }
+    return [img resizableImageWithCapInsets:UIEdgeInsetsMake(capV, capL, capV, capR)];
 }
 
 static void getRGBAComponents(UIColor *color, CGFloat *r, CGFloat *g, CGFloat *b, CGFloat *a)
@@ -157,11 +160,12 @@ static void getRGBAComponents(UIColor *color, CGFloat *r, CGFloat *g, CGFloat *b
 {
     if (jid.length) {
         NSString *key = [WAChatStore keyForJID:jid];
+        NSString *bareUser = [[jid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject;
         NSString *pnJid = [[WAChatStore shared] phoneNumberJIDForJID:jid];
         NSString *lidJid = [[WAChatStore shared] lidJIDForJID:jid];
         NSString *pnKey = pnJid.length ? [[pnJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject : nil;
         NSString *lidKey = lidJid.length ? [[lidJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject : nil;
-        NSArray *tryKeys = @[ key ?: @"", pnKey ?: @"", lidKey ?: @"" ];
+        NSArray *tryKeys = @[ key ?: @"", bareUser ?: @"", pnKey ?: @"", lidKey ?: @"" ];
         UIImage *cached = nil;
         for (NSString *tk in tryKeys) {
             if (!tk.length) continue;

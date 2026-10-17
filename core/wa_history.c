@@ -332,7 +332,7 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
                 } else {
                     char *part = pb_get_string(wmi, wmil, F_WMI_PARTICIPANT);
                     if (!part) part = pb_get_string(key, keyl, F_KEY_PARTICIPANT);
-                    if (part) { char *at = strchr(part, '@'); if (at) *at = 0; msg.sender = part; }
+                    if (part) msg.sender = part;
                 }
             }
         }

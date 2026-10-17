@@ -353,6 +353,23 @@ static BOOL g_storeInitializing = NO;
                 }
             }
         }
+        NSDictionary *msgSenders = seed[@"msgSenders"];
+        if ([msgSenders isKindOfClass:[NSDictionary class]] && msgSenders.count) {
+            for (NSString *ck in [self.chats allKeys]) {
+                if ([ck hasPrefix:@"_"]) continue;
+                NSMutableDictionary *ce = self.chats[ck];
+                if (![ce isKindOfClass:[NSMutableDictionary class]]) continue;
+                NSArray *cmsgs = ce[@"msgs"];
+                if (![cmsgs isKindOfClass:[NSArray class]]) continue;
+                for (NSMutableDictionary *cm in cmsgs) {
+                    if (![cm isKindOfClass:[NSMutableDictionary class]]) continue;
+                    NSString *mid = cm[@"id"];
+                    if (mid.length && msgSenders[mid] && ![cm[@"out"] boolValue]) {
+                        cm[@"sender"] = msgSenders[mid];
+                    }
+                }
+            }
+        }
     }
 
     // Ensure built-in known mappings and merge any duplicate LID/PN chats
