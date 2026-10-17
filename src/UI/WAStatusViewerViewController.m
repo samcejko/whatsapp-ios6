@@ -51,6 +51,7 @@
             capBg.backgroundColor = [UIColor colorWithWhite:0 alpha:0.65];
             UILabel *cap = [[UILabel alloc] initWithFrame:CGRectMake(20, 10, w - 40, 60)];
             cap.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            cap.backgroundColor = [UIColor clearColor];
             cap.textColor = [UIColor whiteColor];
             cap.font = [UIFont systemFontOfSize:16];
             cap.numberOfLines = 2;
@@ -72,6 +73,7 @@
 
         UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(30, (h - 200) / 2, w - 60, 200)];
         lbl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+        lbl.backgroundColor = [UIColor clearColor];
         lbl.textColor = [UIColor whiteColor];
         lbl.font = [UIFont boldSystemFontOfSize:26];
         lbl.numberOfLines = 0;
@@ -110,6 +112,7 @@
     // Contact name
     UILabel *nl = [[UILabel alloc] initWithFrame:CGRectMake(58, 20, w - 120, 20)];
     nl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    nl.backgroundColor = [UIColor clearColor];
     nl.font = [UIFont boldSystemFontOfSize:15];
     nl.textColor = [UIColor whiteColor];
     nl.text = self.contactName;
@@ -118,6 +121,7 @@
     // Time subtitle
     UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(58, 40, w - 120, 14)];
     tl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    tl.backgroundColor = [UIColor clearColor];
     tl.font = [UIFont systemFontOfSize:12];
     tl.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
     tl.text = self.timeText.length ? self.timeText : @"Před chvílí";
