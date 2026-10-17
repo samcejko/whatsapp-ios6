@@ -16,10 +16,10 @@ $headers = @{
 
 Write-Host "Fetching release info for ci-ios6-armv7..."
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/ci-ios6-armv7" -Headers $headers
-$asset = $release.assets | Where-Object { $_.name -eq 'Wazzup-0.1.0.ipa' } | Select-Object -First 1
+$asset = $release.assets | Where-Object { $_.name -like 'Wazzup*.ipa' } | Select-Object -First 1
 
 if (-not $asset) {
-    throw "Wazzup-0.1.0.ipa not found in release assets!"
+    throw "Wazzup IPA not found in release assets!"
 }
 
 Write-Host "Found asset: $($asset.name), size: $($asset.size), updated: $($asset.updated_at)"

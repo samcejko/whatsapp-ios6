@@ -242,6 +242,13 @@
         [self.window.rootViewController presentViewController:c animated:NO completion:nil];
         return YES;
     }
+    if ([cmd isEqualToString:@"endcall"]) {
+        [[WASession shared] endCall];
+        if (self.window.rootViewController.presentedViewController) {
+            [self.window.rootViewController dismissViewControllerAnimated:NO completion:nil];
+        }
+        return YES;
+    }
     if ([cmd isEqualToString:@"newchat"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
         UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
         [nav popToRootViewControllerAnimated:NO];
@@ -299,6 +306,9 @@
         return YES;
     }
     if ([cmd isEqualToString:@"chats"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
+        if (self.window.rootViewController.presentedViewController) {
+            [self.window.rootViewController dismissViewControllerAnimated:NO completion:nil];
+        }
         UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
         [nav popToRootViewControllerAnimated:NO];
         if ([nav.topViewController isKindOfClass:[WAChatsViewController class]]) {

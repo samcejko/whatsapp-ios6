@@ -1,8 +1,8 @@
 Package: com.samcejko.wazzup
-Name: Wazzup
-Version: 0.1.0
+Name: Wazzup (W.I.P)
+Version: 0.1.1
 Architecture: iphoneos-arm
-Description: Unofficial WhatsApp linked-device client for iOS 6: 1:1 voice and video calls, text and group chats, as a linked device like WhatsApp Web
+Description: Unofficial WhatsApp linked-device client for iOS 6 [W.I.P]: 1:1 voice and video calls, text and group chats, as a linked device like WhatsApp Web
 Maintainer: samcejko
 Author: samcejko
 Section: Social
