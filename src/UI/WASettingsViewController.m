@@ -8,6 +8,7 @@
 
 @interface WASettingsViewController () <UIActionSheetDelegate>
 @property (nonatomic, strong) UILabel *statusSub;
+@property (nonatomic, strong) NSArray *blockedList;
 @end
 
 @implementation WASettingsViewController {
@@ -74,7 +75,7 @@
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s
 {
-    if (s == 0) return 4; // Refresh contacts, Wallpaper, Notification sound, Clear all chats
+    if (s == 0) return 5; // Refresh contacts, Wallpaper, Notification sound, Blocked contacts, Clear all chats
     if (s == 1) return 2; // Encryption, Audio Codec
     if (s == 2) return 1; // Unlink
     return 0;
@@ -103,7 +104,7 @@
     NSString *cid = [NSString stringWithFormat:@"cell_%ld_%ld", (long)ip.section, (long)ip.row];
     UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
-        UITableViewCellStyle st = (ip.section == 1 || (ip.section == 0 && (ip.row == 1 || ip.row == 2))) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
+        UITableViewCellStyle st = (ip.section == 1 || (ip.section == 0 && (ip.row == 1 || ip.row == 2 || ip.row == 3))) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
         cell = [[UITableViewCell alloc] initWithStyle:st reuseIdentifier:cid];
     }
     if (ip.section == 0) {
@@ -132,6 +133,11 @@
             else if (sid == 1024) sname = WALoc(@"sound_fanfare");
             else if (sid == 1021) sname = WALoc(@"sound_chime");
             cell.detailTextLabel.text = sname;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (ip.row == 3) {
+            cell.textLabel.text = WALoc(@"blocked_contacts");
+            NSArray *blocked = [[WAChatStore shared] blockedContacts];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)blocked.count];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
             cell.textLabel.text = WALoc(@"clear_all_chats");
@@ -192,6 +198,31 @@
             } else {
                 [as showInView:self.view];
             }
+        } else if (ip.row == 3) { // Blocked contacts
+            self.blockedList = [[WAChatStore shared] blockedContacts];
+            if (self.blockedList.count == 0) {
+                UIAlertView *av = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"no_blocked_contacts") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
+                [av show];
+            } else {
+                UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"blocked_contacts")
+                                                                delegate:self
+                                                       cancelButtonTitle:nil
+                                                  destructiveButtonTitle:nil
+                                                       otherButtonTitles:nil];
+                for (NSString *bjid in self.blockedList) {
+                    NSString *name = WADisplayNameForChat(bjid, nil);
+                    [as addButtonWithTitle:[NSString stringWithFormat:@"%@: %@", WALoc(@"unblock"), name]];
+                }
+                [as addButtonWithTitle:WALoc(@"cancel")];
+                as.cancelButtonIndex = self.blockedList.count;
+                as.tag = 505;
+                if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                    UITableViewCell *cell = [t cellForRowAtIndexPath:ip];
+                    [as showFromRect:cell.bounds inView:cell animated:YES];
+                } else {
+                    [as showInView:self.view];
+                }
+            }
         } else {
             UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"clear_all_chats_confirm")
                                                             delegate:self
@@ -230,6 +261,13 @@
             [[NSUserDefaults standardUserDefaults] setInteger:sid forKey:@"wa_sound_id"];
             [[NSUserDefaults standardUserDefaults] synchronize];
             AudioServicesPlaySystemSound((SystemSoundID)sid);
+            [_table reloadData];
+        }
+    } else if (actionSheet.tag == 505) { // Unblock contact
+        if (buttonIndex < self.blockedList.count) {
+            NSString *toUnblock = self.blockedList[buttonIndex];
+            [[WAChatStore shared] setContact:toUnblock blocked:NO];
+            [[WASession shared] setBlockContact:toUnblock blocked:NO];
             [_table reloadData];
         }
     }

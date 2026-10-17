@@ -2,6 +2,8 @@
 #import "WAChatViewController.h"
 #import "WASettingsViewController.h"
 #import "WACallViewController.h"
+#import "WABroadcastPickerViewController.h"
+#import "WAStatusViewerViewController.h"
 #import "WATheme.h"
 #import "../WACommon.h"
 #import "../WASession.h"
@@ -74,7 +76,7 @@
 }
 @end
 
-@interface WAChatsViewController () <UISearchBarDelegate, UIActionSheetDelegate, ABPeoplePickerNavigationControllerDelegate>
+@interface WAChatsViewController () <UISearchBarDelegate, UIActionSheetDelegate, ABPeoplePickerNavigationControllerDelegate, WABroadcastPickerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UILabel *empty;
 @property (nonatomic, strong) UILabel *banner;
@@ -82,9 +84,11 @@
 @property (nonatomic, strong) NSMutableArray *chats;      // all chats, newest-first
 @property (nonatomic, strong) NSMutableArray *filtered;   // search results
 @property (nonatomic, strong) NSMutableArray *callLogs;   // call history
+@property (nonatomic, strong) NSMutableArray *statusItems;// contact statuses
 @property (nonatomic, copy) NSString *query;
 @property (nonatomic, strong) NSMutableSet *requestedAvatars;
 @property (nonatomic, strong) NSDictionary *selectedChatForAction;
+@property (nonatomic, strong) UIPopoverController *statusPopover;
 @end
 
 @implementation WAChatsViewController
@@ -94,7 +98,7 @@
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor whiteColor];
 
-    self.navSegment = [[UISegmentedControl alloc] initWithItems:@[ WALoc(@"chats_title"), WALoc(@"calls_tab") ]];
+    self.navSegment = [[UISegmentedControl alloc] initWithItems:@[ WALoc(@"chats_title"), WALoc(@"status_title"), WALoc(@"calls_tab") ]];
     self.navSegment.segmentedControlStyle = UISegmentedControlStyleBar;
     self.navSegment.selectedSegmentIndex = 0;
     [self.navSegment addTarget:self action:@selector(onSegmentChanged) forControlEvents:UIControlEventValueChanged];
@@ -108,6 +112,7 @@
     self.chats = [NSMutableArray array];
     self.filtered = [NSMutableArray array];
     self.callLogs = [NSMutableArray array];
+    self.statusItems = [NSMutableArray array];
 
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
     self.table.dataSource = self;
@@ -151,6 +156,11 @@
             [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newChat)];
         self.table.tableHeaderView = self.searchBar;
         self.empty.text = WALoc(@"no_chats");
+    } else if (self.navSegment.selectedSegmentIndex == 1) {
+        self.navigationItem.rightBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(addStatusTapped)];
+        self.table.tableHeaderView = nil;
+        self.empty.text = @"";
     } else {
         self.navigationItem.rightBarButtonItem =
             [[UIBarButtonItem alloc] initWithTitle:WALoc(@"clear") style:UIBarButtonItemStylePlain target:self action:@selector(clearCalls)];
@@ -165,6 +175,8 @@
 {
     if (self.navSegment.selectedSegmentIndex == 0) {
         self.empty.hidden = [self rows].count > 0;
+    } else if (self.navSegment.selectedSegmentIndex == 1) {
+        self.empty.hidden = YES;
     } else {
         self.empty.hidden = self.callLogs.count > 0;
     }
@@ -207,6 +219,7 @@
                                  @"muted": row[@"muted"] ?: @NO }];
     }
     self.callLogs = [[[WAChatStore shared] callLogs] mutableCopy];
+    self.statusItems = [[[WAChatStore shared] contactStatuses] mutableCopy];
     [self applyFilter];
 }
 
@@ -356,11 +369,43 @@
             tf.keyboardType = UIKeyboardTypePhonePad;
             tf.placeholder = @"+420...";
             [alert show];
+        } else if (buttonIndex == 2) {
+            WABroadcastPickerViewController *picker = [[WABroadcastPickerViewController alloc] init];
+            picker.delegate = self;
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+            [WATheme styleNavigationBar:nav.navigationBar];
+            if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                nav.modalPresentationStyle = UIModalPresentationFormSheet;
+            }
+            [self presentViewController:nav animated:YES completion:nil];
+        }
+    } else if (actionSheet.tag == 700) {
+        if (buttonIndex == 0) {
+            UIAlertView *av = [[UIAlertView alloc] initWithTitle:WALoc(@"status_add")
+                                                         message:WALoc(@"status_my")
+                                                        delegate:self
+                                               cancelButtonTitle:WALoc(@"cancel")
+                                               otherButtonTitles:WALoc(@"ok"), nil];
+            av.alertViewStyle = UIAlertViewStylePlainTextInput;
+            av.tag = 701;
+            UITextField *tf = [av textFieldAtIndex:0];
+            tf.placeholder = @"Status...";
+            [av show];
+        } else if (buttonIndex == 1) {
+            UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+            picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+            picker.delegate = self;
+            if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+                self.statusPopover = [[UIPopoverController alloc] initWithContentViewController:picker];
+                [self.statusPopover presentPopoverFromBarButtonItem:self.navigationItem.rightBarButtonItem permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
+            } else {
+                [self presentViewController:picker animated:YES completion:nil];
+            }
         }
     }
 }
 
-#pragma mark - new chat
+#pragma mark - new chat & status
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
 {
@@ -368,7 +413,61 @@
         UITextField *tf = [alertView textFieldAtIndex:0];
         NSString *num = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
         if (num.length) [self openChatWithNumber:num];
+    } else if (alertView.tag == 701 && buttonIndex == 1) {
+        UITextField *tf = [alertView textFieldAtIndex:0];
+        NSString *txt = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (txt.length) {
+            [[WAChatStore shared] setMyStatusText:txt];
+            [self.table reloadData];
+        }
     }
+}
+
+- (void)addStatusTapped
+{
+    UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"status_add")
+                                                    delegate:self
+                                           cancelButtonTitle:WALoc(@"cancel")
+                                      destructiveButtonTitle:nil
+                                           otherButtonTitles:@"Textový status", WALoc(@"choose_photo"), nil];
+    as.tag = 700;
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        [as showFromBarButtonItem:self.navigationItem.rightBarButtonItem animated:YES];
+    } else {
+        [as showInView:self.view];
+    }
+}
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+{
+    UIImage *img = info[UIImagePickerControllerEditedImage] ?: info[UIImagePickerControllerOriginalImage];
+    if (img) {
+        [[WAChatStore shared] setMyStatusText:@"Foto status" image:img];
+        [self.table reloadData];
+    }
+    if (self.statusPopover) {
+        [self.statusPopover dismissPopoverAnimated:YES];
+        self.statusPopover = nil;
+    } else {
+        [picker dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+    if (self.statusPopover) {
+        [self.statusPopover dismissPopoverAnimated:YES];
+        self.statusPopover = nil;
+    } else {
+        [picker dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+- (void)broadcastPickerDidFinishWithRecipients:(NSArray *)recipients
+{
+    if (!recipients.count) return;
+    [[WAChatStore shared] createBroadcastListWithRecipients:recipients name:nil];
+    [self reloadFromStore];
 }
 
 - (void)newChat
@@ -377,7 +476,7 @@
                                                        delegate:self
                                               cancelButtonTitle:WALoc(@"cancel")
                                          destructiveButtonTitle:nil
-                                              otherButtonTitles:WALoc(@"choose_contact"), WALoc(@"enter_number"), nil];
+                                              otherButtonTitles:WALoc(@"choose_contact"), WALoc(@"enter_number"), WALoc(@"new_broadcast"), nil];
     sheet.tag = 100;
     if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
         [sheet showFromBarButtonItem:self.navigationItem.rightBarButtonItem animated:YES];
@@ -453,15 +552,75 @@
 
 #pragma mark - table
 
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t
+{
+    if (self.navSegment.selectedSegmentIndex == 1) return 2;
+    return 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
+{
+    if (self.navSegment.selectedSegmentIndex == 1) {
+        if (section == 0) return WALoc(@"status_my");
+        if (section == 1) return WALoc(@"status_recent");
+    }
+    return nil;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    if (self.navSegment.selectedSegmentIndex == 0) return 70;
+    return 60;
+}
+
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s
 {
-    if (self.navSegment.selectedSegmentIndex == 1) return self.callLogs.count;
+    if (self.navSegment.selectedSegmentIndex == 1) {
+        if (s == 0) return 1;
+        return self.statusItems.count;
+    }
+    if (self.navSegment.selectedSegmentIndex == 2) return self.callLogs.count;
     return [self rows].count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip
 {
     if (self.navSegment.selectedSegmentIndex == 1) {
+        static NSString *sId = @"status_cell";
+        UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:sId];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:sId];
+        }
+        if (ip.section == 0) {
+            NSDictionary *ms = [[WAChatStore shared] myStatus];
+            cell.textLabel.text = WALoc(@"status_my");
+            cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+            if (ms) {
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", ms[@"time"] ?: @"", ms[@"text"] ?: @""];
+                UIImage *img = [[WAChatStore shared] myStatusImage];
+                cell.imageView.image = img ?: [WATheme avatarForName:WALoc(@"you") jid:@"my_status" diameter:44];
+            } else {
+                cell.detailTextLabel.text = WALoc(@"status_add");
+                cell.imageView.image = [WATheme avatarForName:WALoc(@"you") jid:@"my_status" diameter:44];
+            }
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.accessoryView = nil;
+        } else {
+            NSDictionary *item = (ip.row < self.statusItems.count) ? self.statusItems[ip.row] : nil;
+            NSString *sname = item[@"name"] ?: @"";
+            cell.textLabel.text = sname;
+            cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", item[@"time"] ?: @"", item[@"text"] ?: @""];
+            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+            cell.imageView.image = [WATheme avatarForName:sname jid:item[@"jid"] diameter:44];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.accessoryView = nil;
+        }
+        return cell;
+    }
+
+    if (self.navSegment.selectedSegmentIndex == 2) {
         UITableViewCell *cell = [t dequeueReusableCellWithIdentifier:@"call_cell"];
         if (!cell) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"call_cell"];
@@ -556,6 +715,35 @@
     [t deselectRowAtIndexPath:ip animated:YES];
     [self.searchBar resignFirstResponder];
     if (self.navSegment.selectedSegmentIndex == 1) {
+        if (ip.section == 0) {
+            NSDictionary *ms = [[WAChatStore shared] myStatus];
+            if (ms) {
+                UIImage *img = [[WAChatStore shared] myStatusImage];
+                WAStatusViewerViewController *vc = [[WAStatusViewerViewController alloc] initWithContactName:WALoc(@"status_my")
+                                                                                                        jid:@"my_status"
+                                                                                                   timeText:ms[@"time"]
+                                                                                                       text:ms[@"text"]
+                                                                                                      image:img];
+                vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+                [self presentViewController:vc animated:YES completion:nil];
+            } else {
+                [self addStatusTapped];
+            }
+        } else {
+            if (ip.row < self.statusItems.count) {
+                NSDictionary *item = self.statusItems[ip.row];
+                WAStatusViewerViewController *vc = [[WAStatusViewerViewController alloc] initWithContactName:item[@"name"]
+                                                                                                        jid:item[@"jid"]
+                                                                                                   timeText:item[@"time"]
+                                                                                                       text:item[@"text"]
+                                                                                                      image:nil];
+                vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+                [self presentViewController:vc animated:YES completion:nil];
+            }
+        }
+        return;
+    }
+    if (self.navSegment.selectedSegmentIndex == 2) {
         NSDictionary *log = self.callLogs[ip.row];
         NSString *jid = log[@"jid"];
         NSString *name = log[@"name"];

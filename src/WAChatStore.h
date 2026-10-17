@@ -79,6 +79,24 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Blocked contacts
 - (BOOL)isContactBlocked:(NSString *)jid;
 - (void)setContact:(NSString *)jid blocked:(BOOL)blocked;
+- (NSArray *)blockedContacts;
+
+// Group participants
+- (NSArray *)participantsForGroup:(NSString *)jid;
+- (void)addParticipant:(NSString *)participantJID toGroup:(NSString *)groupJID;
+- (void)removeParticipant:(NSString *)participantJID fromGroup:(NSString *)groupJID;
+
+// Broadcast lists
+- (void)createBroadcastListWithRecipients:(NSArray *)recipients name:(NSString *)name;
+- (NSArray *)recipientsForBroadcast:(NSString *)jid;
+
+// Status
+- (NSDictionary *)myStatus;
+- (UIImage *)myStatusImage;
+- (void)setMyStatusText:(NSString *)text;
+- (void)setMyStatusText:(NSString *)text image:(UIImage *)image;
+- (NSArray *)contactStatuses;
+- (void)recordContactStatus:(NSString *)text forJID:(NSString *)jid;
 
 // Call Logs
 - (void)recordCallLog:(NSDictionary *)log;

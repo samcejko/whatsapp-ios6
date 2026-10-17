@@ -145,4 +145,18 @@
 "edit_name" = "Edit Name";
 "edit_name_prompt" = "Enter a new name for this chat:";
 "save" = "Save";
+"blocked_contacts" = "Blocked Contacts";
+"no_blocked_contacts" = "No blocked contacts";
+"unblock" = "Unblock";
+"broadcast_lists" = "Broadcast Lists";
+"new_broadcast" = "New Broadcast List";
+"broadcast_title" = "Broadcast Message";
+"broadcast_recipients" = "Broadcast Recipients";
+"status_title" = "Statuses";
+"status_my" = "My Status";
+"status_recent" = "Recent Updates";
+"status_add" = "Add Status";
+"group_add_participant" = "Add Participant";
+"group_admin" = "Admin";
+
 

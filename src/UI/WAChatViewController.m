@@ -324,6 +324,11 @@
 
 - (void)micTouchDown
 {
+    if ([[WAChatStore shared] isContactBlocked:self.jid]) {
+        UIAlertView *av = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"contact_blocked") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
+        [av show];
+        return;
+    }
     self.isRecordingVoice = YES;
     self.field.placeholder = WALoc(@"recording");
     [[WASession shared] sendRecordingState:YES toJID:self.jid];
@@ -541,6 +546,17 @@
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
 {
+    if ([[WAChatStore shared] isContactBlocked:self.jid]) {
+        UIAlertView *av = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"contact_blocked") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
+        [av show];
+        if (self.popover) {
+            [self.popover dismissPopoverAnimated:YES];
+            self.popover = nil;
+        } else {
+            [picker dismissViewControllerAnimated:YES completion:nil];
+        }
+        return;
+    }
     UIImage *orig = info[UIImagePickerControllerOriginalImage];
     if (orig) {
         CGSize sz = orig.size;
@@ -564,9 +580,19 @@
 
         NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
         [[WAChatStore shared] recordOutgoingMedia:thumbData caption:@"" toJID:self.jid msgId:mid status:WAMessageStatusPending];
-        [[WASession shared] sendImage:jpegData thumb:thumbData caption:@"" toJID:self.jid msgId:mid];
+        BOOL isBroadcast = ([self.jid rangeOfString:@"@broadcast"].location != NSNotFound);
+        if (isBroadcast) {
+            NSArray *recipients = [[WAChatStore shared] recipientsForBroadcast:self.jid];
+            for (NSString *recip in recipients) {
+                NSString *rmid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+                [[WAChatStore shared] recordOutgoingMedia:thumbData caption:@"" toJID:recip msgId:rmid status:WAMessageStatusPending];
+                [[WASession shared] sendImage:jpegData thumb:thumbData caption:@"" toJID:recip msgId:rmid];
+            }
+        } else {
+            [[WASession shared] sendImage:jpegData thumb:thumbData caption:@"" toJID:self.jid msgId:mid];
+        }
         AudioServicesPlaySystemSound(1004);
-        WALog(@"send image to %@ [%@]: %lu bytes", self.jid, mid, (unsigned long)jpegData.length);
+        WALog(@"send image to %@ [%@]: %lu bytes (broadcast=%d)", self.jid, mid, (unsigned long)jpegData.length, isBroadcast);
     }
     if (self.popover) {
         [self.popover dismissPopoverAnimated:YES];
@@ -620,6 +646,11 @@
 
 - (void)sendTapped
 {
+    if ([[WAChatStore shared] isContactBlocked:self.jid]) {
+        UIAlertView *av = [[UIAlertView alloc] initWithTitle:nil message:WALoc(@"contact_blocked") delegate:nil cancelButtonTitle:WALoc(@"ok") otherButtonTitles:nil];
+        [av show];
+        return;
+    }
     NSString *text = [self.field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!text.length) return;
     self.field.text = @"";
@@ -638,9 +669,19 @@
     }
 
     [[WAChatStore shared] recordOutgoing:text toJID:self.jid msgId:mid status:WAMessageStatusPending quoted:quoted];
-    [[WASession shared] sendText:text toJID:self.jid msgId:mid];
+    BOOL isBroadcast = ([self.jid rangeOfString:@"@broadcast"].location != NSNotFound);
+    if (isBroadcast) {
+        NSArray *recipients = [[WAChatStore shared] recipientsForBroadcast:self.jid];
+        for (NSString *recip in recipients) {
+            NSString *rmid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+            [[WAChatStore shared] recordOutgoing:text toJID:recip msgId:rmid status:WAMessageStatusPending quoted:nil];
+            [[WASession shared] sendText:text toJID:recip msgId:rmid];
+        }
+    } else {
+        [[WASession shared] sendText:text toJID:self.jid msgId:mid];
+    }
     AudioServicesPlaySystemSound(1004);
-    WALog(@"send to %@ [%@]: %lu chars", self.jid, mid, (unsigned long)text.length);
+    WALog(@"send to %@ [%@]: %lu chars (broadcast=%d)", self.jid, mid, (unsigned long)text.length, isBroadcast);
 }
 
 - (void)scrollToBottom

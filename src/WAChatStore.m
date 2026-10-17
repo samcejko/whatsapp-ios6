@@ -768,6 +768,172 @@ static NSString *msgSig(NSDictionary *m)
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
 }
 
+- (NSArray *)blockedContacts
+{
+    NSMutableArray *res = [NSMutableArray array];
+    for (NSString *k in self.chats) {
+        if ([k hasPrefix:@"_"]) continue;
+        NSDictionary *e = self.chats[k];
+        if ([e isKindOfClass:[NSDictionary class]] && [e[@"blocked"] boolValue]) {
+            NSString *jid = e[@"jid"];
+            if (jid.length) [res addObject:jid];
+        }
+    }
+    return res;
+}
+
+- (NSArray *)participantsForGroup:(NSString *)jid
+{
+    if (!jid.length) return @[];
+    NSDictionary *e = self.chats[[self keyFor:jid]];
+    NSArray *p = e[@"participants"];
+    if ([p isKindOfClass:[NSArray class]] && p.count > 0) return p;
+
+    NSMutableArray *def = [NSMutableArray array];
+    NSString *own = [WASession shared].ownJID;
+    if (own.length) [def addObject:own];
+
+    for (NSString *k in self.chats) {
+        if ([k hasPrefix:@"_"]) continue;
+        NSDictionary *c = self.chats[k];
+        NSString *cjid = c[@"jid"];
+        if (cjid.length && [cjid rangeOfString:@"@g.us"].location == NSNotFound && ![cjid isEqualToString:own]) {
+            [def addObject:cjid];
+            if (def.count >= 6) break;
+        }
+    }
+    NSMutableDictionary *me = [self entryForJID:jid create:YES];
+    me[@"participants"] = def;
+    [self save];
+    return def;
+}
+
+- (void)addParticipant:(NSString *)participantJID toGroup:(NSString *)groupJID
+{
+    if (!participantJID.length || !groupJID.length) return;
+    NSMutableDictionary *e = [self entryForJID:groupJID create:YES];
+    NSMutableArray *p = [NSMutableArray arrayWithArray:[self participantsForGroup:groupJID]];
+    if (![p containsObject:participantJID]) {
+        [p addObject:participantJID];
+        e[@"participants"] = p;
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:groupJID] }];
+    }
+}
+
+- (void)removeParticipant:(NSString *)participantJID fromGroup:(NSString *)groupJID
+{
+    if (!participantJID.length || !groupJID.length) return;
+    NSMutableDictionary *e = [self entryForJID:groupJID create:YES];
+    NSMutableArray *p = [NSMutableArray arrayWithArray:[self participantsForGroup:groupJID]];
+    if ([p containsObject:participantJID]) {
+        [p removeObject:participantJID];
+        e[@"participants"] = p;
+        [self save];
+        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:groupJID] }];
+    }
+}
+
+- (void)createBroadcastListWithRecipients:(NSArray *)recipients name:(NSString *)name
+{
+    if (!recipients.count) return;
+    NSString *bjid = [NSString stringWithFormat:@"%u@broadcast", (unsigned int)arc4random()];
+    NSMutableDictionary *e = [self entryForJID:bjid create:YES];
+    e[@"jid"] = bjid;
+    e[@"name"] = name.length ? name : [NSString stringWithFormat:@"%@ (%lu)", WALoc(@"broadcast_title"), (unsigned long)recipients.count];
+    e[@"recipients"] = [NSMutableArray arrayWithArray:recipients];
+    e[@"ts"] = @((int)[[NSDate date] timeIntervalSince1970]);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+}
+
+- (NSArray *)recipientsForBroadcast:(NSString *)jid
+{
+    if (!jid.length) return @[];
+    NSDictionary *e = self.chats[[self keyFor:jid]];
+    NSArray *r = e[@"recipients"];
+    return [r isKindOfClass:[NSArray class]] ? r : @[];
+}
+
+- (NSDictionary *)myStatus
+{
+    NSDictionary *s = self.chats[@"_my_status"];
+    return [s isKindOfClass:[NSDictionary class]] ? s : nil;
+}
+
+- (UIImage *)myStatusImage
+{
+    NSDictionary *s = [self myStatus];
+    if ([s[@"hasImage"] boolValue]) {
+        NSString *p = [WADocumentsPath() stringByAppendingPathComponent:@"wa6_my_status.jpg"];
+        return [UIImage imageWithContentsOfFile:p];
+    }
+    return nil;
+}
+
+- (void)setMyStatusText:(NSString *)text
+{
+    [self setMyStatusText:text image:nil];
+}
+
+- (void)setMyStatusText:(NSString *)text image:(UIImage *)image
+{
+    if (!text.length && !image) return;
+    BOOL hasImg = NO;
+    if (image) {
+        NSData *d = UIImageJPEGRepresentation(image, 0.85);
+        if (d.length) {
+            NSString *p = [WADocumentsPath() stringByAppendingPathComponent:@"wa6_my_status.jpg"];
+            [d writeToFile:p atomically:YES];
+            hasImg = YES;
+        }
+    }
+    self.chats[@"_my_status"] = @{
+        @"text": text ?: @"",
+        @"hasImage": @(hasImg),
+        @"time": @"Před chvílí",
+        @"ts": @((int)[[NSDate date] timeIntervalSince1970])
+    };
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+}
+
+- (NSArray *)contactStatuses
+{
+    NSMutableArray *res = [NSMutableArray array];
+    for (NSDictionary *c in [self conversationsSorted]) {
+        NSString *jid = c[@"jid"];
+        if (!jid.length || [jid hasSuffix:@"@g.us"] || [jid hasSuffix:@"@broadcast"]) continue;
+        NSString *name = c[@"name"];
+        NSString *last = c[@"last"];
+        NSMutableDictionary *entry = self.chats[[self keyFor:jid]];
+        NSString *stText = entry[@"statusText"];
+        if (!stText.length) {
+            stText = last.length ? last : @"Hey there! I am using WhatsApp.";
+        }
+        [res addObject:@{
+            @"jid": jid,
+            @"name": WADisplayNameForChat(jid, name),
+            @"text": stText,
+            @"ts": entry[@"statusTs"] ?: (c[@"ts"] ?: @((int)[[NSDate date] timeIntervalSince1970] - 3600)),
+            @"time": entry[@"statusTime"] ?: WAListTime([c[@"ts"] unsignedLongLongValue])
+        }];
+        if (res.count >= 15) break;
+    }
+    return res;
+}
+
+- (void)recordContactStatus:(NSString *)text forJID:(NSString *)jid
+{
+    if (!text.length || !jid.length) return;
+    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    e[@"statusText"] = text;
+    e[@"statusTime"] = @"Před chvílí";
+    e[@"statusTs"] = @((int)[[NSDate date] timeIntervalSince1970]);
+    [self save];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:nil];
+}
+
 - (void)recordCallLog:(NSDictionary *)log
 {
     if (!log) return;

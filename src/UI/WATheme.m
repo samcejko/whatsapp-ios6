@@ -207,8 +207,14 @@
     CGGradientRelease(g);
     CGColorSpaceRelease(cs);
     CGContextRestoreGState(c);
+    BOOL isBroadcast = [jid rangeOfString:@"@broadcast"].location != NSNotFound;
     [[UIColor whiteColor] set];
-    if (group || initials.length == 0) {
+    if (isBroadcast) {
+        NSString *glyph = @"\U0001F4E2";   // megaphone / broadcast
+        UIFont *f = [UIFont systemFontOfSize:d * 0.5];
+        CGSize ts = [glyph sizeWithFont:f];
+        [glyph drawAtPoint:CGPointMake((d - ts.width) / 2, (d - ts.height) / 2) withFont:f];
+    } else if (group || initials.length == 0) {
         NSString *glyph = group ? @"\U0001F465" : @"\U0001F464";   // group / person
         UIFont *f = [UIFont systemFontOfSize:d * 0.5];
         CGSize ts = [glyph sizeWithFont:f];

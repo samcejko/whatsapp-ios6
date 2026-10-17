@@ -145,4 +145,18 @@
 "edit_name" = "Upravit jm\U00e9no";
 "edit_name_prompt" = "Zadejte nov\U00e9 jm\U00e9no pro tento chat:";
 "save" = "Ulo\U017eit";
+"blocked_contacts" = "Blokovan\U00e9 kontakty";
+"no_blocked_contacts" = "\U017d\U00e1dn\U00e9 blokovan\U00e9 kontakty";
+"unblock" = "Odblokovat";
+"broadcast_lists" = "Seznamy vys\U00edl\U00e1n\U00ed";
+"new_broadcast" = "Nov\U00fd seznam vys\U00edl\U00e1n\U00ed";
+"broadcast_title" = "Hromadn\U00e1 zpr\U00e1va";
+"broadcast_recipients" = "P\U0159\U00edjemci vys\U00edl\U00e1n\U00ed";
+"status_title" = "Statusy";
+"status_my" = "M\U016fj status";
+"status_recent" = "Ned\U00e1vn\U00e9 aktualizace";
+"status_add" = "P\U0159idat status";
+"group_add_participant" = "P\U0159idat \U00fa\U010dastn\U00edka";
+"group_admin" = "Admin";
+
 

@@ -1,4 +1,5 @@
 #import "WAContactInfoViewController.h"
+#import "WAChatViewController.h"
 #import "WACallViewController.h"
 #import "WAMediaViewController.h"
 #import "WAMediaGalleryViewController.h"
@@ -19,6 +20,7 @@
 @property (nonatomic, strong) UILabel *phoneLabel;
 @property (nonatomic, strong) NSArray *messages;
 @property (nonatomic, strong) NSArray *participants;
+@property (nonatomic, copy) NSString *selectedParticipant;
 @end
 
 @implementation WAContactInfoViewController
@@ -58,12 +60,7 @@
 {
     self.messages = [[WAChatStore shared] messagesForJID:self.jid];
     if (self.isGroup) {
-        NSMutableSet *parts = [NSMutableSet set];
-        for (NSDictionary *m in self.messages) {
-            NSString *s = m[@"sender"];
-            if (s.length) [parts addObject:s];
-        }
-        self.participants = [parts allObjects];
+        self.participants = [[WAChatStore shared] participantsForGroup:self.jid];
     }
 }
 
@@ -137,7 +134,7 @@
     if (section == 0) return self.isGroup ? 0 : 2; // Call, Video Call
     if (section == 1) return 3; // Messages count, Media count, Starred count
     if (section == 2) return 3; // Mute, Wallpaper, Disappearing messages
-    if (section == 3) return self.isGroup ? (self.participants.count ?: 1) : 1; // Participants list or Block contact
+    if (section == 3) return self.isGroup ? (self.participants.count + 1) : 1; // "Add participant" + Participants list or Block contact
     if (section == 4) return self.isGroup ? 3 : 2; // (Leave Group), Clear Chat, Delete Chat
     return 0;
 }
@@ -155,7 +152,7 @@
     NSString *cellId = [NSString stringWithFormat:@"Cell_%ld_%ld", (long)indexPath.section, (long)indexPath.row];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
     if (!cell) {
-        UITableViewCellStyle style = (indexPath.section == 1 || indexPath.section == 2) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
+        UITableViewCellStyle style = (indexPath.section == 1 || indexPath.section == 2 || (indexPath.section == 3 && self.isGroup && indexPath.row > 0)) ? UITableViewCellStyleValue1 : UITableViewCellStyleDefault;
         cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:cellId];
     }
     cell.imageView.image = nil;
@@ -222,16 +219,24 @@
         }
     } else if (indexPath.section == 3) {
         if (self.isGroup) {
-            if (self.participants.count > 0) {
-                NSString *p = self.participants[indexPath.row];
-                cell.textLabel.text = WADisplayNameForChat(p, nil);
-                cell.imageView.image = [WATheme avatarForName:cell.textLabel.text jid:p diameter:36];
+            if (indexPath.row == 0) {
+                cell.textLabel.text = WALoc(@"group_add_participant");
+                cell.textLabel.textColor = [WATheme accent];
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
+                cell.detailTextLabel.text = nil;
+                cell.imageView.image = [WATheme contactIconWithColor:[WATheme accent] size:CGSizeMake(22, 22)];
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.selectionStyle = UITableViewCellSelectionStyleBlue;
             } else {
-                cell.textLabel.text = WALoc(@"group_default");
-                cell.imageView.image = nil;
+                NSString *p = self.participants[indexPath.row - 1];
+                cell.textLabel.text = WADisplayNameForChat(p, nil);
+                cell.textLabel.textColor = [UIColor blackColor];
+                cell.textLabel.textAlignment = NSTextAlignmentLeft;
+                cell.detailTextLabel.text = (indexPath.row == 1) ? WALoc(@"group_admin") : WAFormatPhoneNumber(p);
+                cell.imageView.image = [WATheme avatarForName:cell.textLabel.text jid:p diameter:36];
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.selectionStyle = UITableViewCellSelectionStyleBlue;
             }
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            cell.accessoryType = UITableViewCellAccessoryNone;
         } else {
             BOOL isBlocked = [[WAChatStore shared] isContactBlocked:self.jid];
             cell.textLabel.text = isBlocked ? WALoc(@"unblock_contact") : WALoc(@"block_contact");
@@ -310,7 +315,23 @@
             [as showInView:self.view];
         }
     } else if (indexPath.section == 3) {
-        if (!self.isGroup) {
+        if (self.isGroup) {
+            if (indexPath.row == 0) {
+                ABPeoplePickerNavigationController *picker = [[ABPeoplePickerNavigationController alloc] init];
+                picker.peoplePickerDelegate = self;
+                [self presentViewController:picker animated:YES completion:nil];
+            } else {
+                self.selectedParticipant = self.participants[indexPath.row - 1];
+                NSString *pName = WADisplayNameForChat(self.selectedParticipant, nil);
+                UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:pName
+                                                                delegate:self
+                                                       cancelButtonTitle:WALoc(@"cancel")
+                                                  destructiveButtonTitle:WALoc(@"delete")
+                                                       otherButtonTitles:WALoc(@"message_hint"), WALoc(@"call_voice"), nil];
+                as.tag = 301;
+                [as showInView:self.view];
+            }
+        } else {
             BOOL isBlocked = [[WAChatStore shared] isContactBlocked:self.jid];
             BOOL nextState = !isBlocked;
             [[WAChatStore shared] setContact:self.jid blocked:nextState];
@@ -386,7 +407,65 @@
             [[WAChatStore shared] deleteChat:self.jid];
             [self.navigationController popToRootViewControllerAnimated:YES];
         }
+    } else if (actionSheet.tag == 301) { // Participant actions
+        if (buttonIndex == actionSheet.destructiveButtonIndex) {
+            if (self.selectedParticipant.length) {
+                [[WAChatStore shared] removeParticipant:self.selectedParticipant fromGroup:self.jid];
+                [self reloadChatData];
+                [self.table reloadData];
+            }
+        } else if (buttonIndex == 1) { // Message
+            if (self.selectedParticipant.length) {
+                WAChatViewController *cv = [[WAChatViewController alloc] initWithJID:self.selectedParticipant title:WADisplayNameForChat(self.selectedParticipant, nil)];
+                [self.navigationController pushViewController:cv animated:YES];
+            }
+        } else if (buttonIndex == 2) { // Voice Call
+            if (self.selectedParticipant.length) {
+                [[WASession shared] placeCallTo:self.selectedParticipant video:NO];
+                WACallViewController *c = [[WACallViewController alloc] initWithJID:self.selectedParticipant name:WADisplayNameForChat(self.selectedParticipant, nil) video:NO incoming:NO];
+                c.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+                [self presentViewController:c animated:YES completion:nil];
+            }
+        }
     }
+}
+
+#pragma mark - Address Book People Picker
+
+- (BOOL)peoplePickerNavigationController:(ABPeoplePickerNavigationController *)peoplePicker shouldContinueAfterSelectingPerson:(ABRecordRef)person
+{
+    ABMultiValueRef phones = ABRecordCopyValue(person, kABPersonPhoneProperty);
+    if (phones) {
+        CFIndex count = ABMultiValueGetCount(phones);
+        if (count > 0) {
+            CFStringRef rawPhone = ABMultiValueCopyValueAtIndex(phones, 0);
+            NSString *phoneStr = (__bridge_transfer NSString *)rawPhone;
+            NSMutableString *digits = [NSMutableString string];
+            for (NSUInteger i = 0; i < phoneStr.length; i++) {
+                unichar c = [phoneStr characterAtIndex:i];
+                if (c >= '0' && c <= '9') [digits appendFormat:@"%C", c];
+            }
+            if (digits.length) {
+                NSString *pjid = [NSString stringWithFormat:@"%@@s.whatsapp.net", digits];
+                [[WAChatStore shared] addParticipant:pjid toGroup:self.jid];
+                [self reloadChatData];
+                [self.table reloadData];
+            }
+        }
+        CFRelease(phones);
+    }
+    [self dismissViewControllerAnimated:YES completion:nil];
+    return NO;
+}
+
+- (BOOL)peoplePickerNavigationController:(ABPeoplePickerNavigationController *)peoplePicker shouldContinueAfterSelectingPerson:(ABRecordRef)person property:(ABPropertyID)property identifier:(ABMultiValueIdentifier)identifier
+{
+    return NO;
+}
+
+- (void)peoplePickerNavigationControllerDidCancel:(ABPeoplePickerNavigationController *)peoplePicker
+{
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)editNameTapped
