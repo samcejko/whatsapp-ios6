@@ -142,4 +142,7 @@
 "release_to_send" = "Pustit pro odesl\U00e1n\U00ed";
 "slide_to_cancel" = "P\U0159ejet\U00edm zru\U0161\U00edte";
 "recording" = "Nahr\U00e1v\U00e1n\U00ed\U2026";
+"edit_name" = "Upravit jm\U00e9no";
+"edit_name_prompt" = "Zadejte nov\U00e9 jm\U00e9no pro tento chat:";
+"save" = "Ulo\U017eit";
 

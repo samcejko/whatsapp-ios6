@@ -91,6 +91,9 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 // Sets/updates the peer's WhatsApp pushName for a JID
 - (void)setPushName:(NSString *)pushName forJID:(NSString *)jid;
 
+// Sets/updates a user-assigned custom name for a JID (persists across launches)
+- (void)setCustomName:(NSString *)customName forJID:(NSString *)jid;
+
 // A localized "📷 Photo"-style label for a media message kind (WA_MSG_*), shared by the list and the bubbles.
 + (NSString *)mediaLabelForKind:(int)kind;
 

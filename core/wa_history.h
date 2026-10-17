@@ -77,6 +77,7 @@ typedef struct {
     char *jid;           // conversation id (remote JID), e.g. "4915...@s.whatsapp.net" or "...@g.us"
     char *name;          // display name (Conversation.name / .displayName), or NULL
     char *last;          // text of the most recent message, or NULL
+    char *pn_jid;        // phone number JID if present (e.g. for @lid conversations)
     uint64_t timestamp;  // conversationTimestamp / lastMsgTimestamp / newest messageTimestamp (seconds) for sorting
     uint32_t unread;     // unreadCount, or 0
     wa_history_msg *msgs; // text messages, oldest-first (NULL when none)
@@ -84,8 +85,15 @@ typedef struct {
 } wa_history_conv;
 
 typedef struct {
+    char *id;
+    char *pushname;
+} wa_history_pushname;
+
+typedef struct {
     wa_history_conv *convs;
     int nconvs;
+    wa_history_pushname *pushnames;
+    int npushnames;
     int sync_type;       // HistorySync.syncType (0 = INITIAL_BOOTSTRAP, 3 = RECENT, 2 = FULL, ...)
 } wa_history_result;
 

@@ -49,6 +49,8 @@
 
     [self.view addSubview:self.table];
 
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemEdit target:self action:@selector(editNameTapped)];
+
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
 }
 
@@ -384,6 +386,33 @@
             [[WAChatStore shared] deleteChat:self.jid];
             [self.navigationController popToRootViewControllerAnimated:YES];
         }
+    }
+}
+
+- (void)editNameTapped
+{
+    UIAlertView *av = [[UIAlertView alloc] initWithTitle:WALoc(@"edit_name")
+                                                message:WALoc(@"edit_name_prompt")
+                                               delegate:self
+                                      cancelButtonTitle:WALoc(@"cancel")
+                                      otherButtonTitles:WALoc(@"save"), nil];
+    av.alertViewStyle = UIAlertViewStylePlainTextInput;
+    UITextField *tf = [av textFieldAtIndex:0];
+    tf.text = WADisplayNameForChat(self.jid, self.name);
+    av.tag = 992;
+    [av show];
+}
+
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    if (alertView.tag == 992 && buttonIndex == 1) {
+        UITextField *tf = [alertView textFieldAtIndex:0];
+        NSString *newName = [tf.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        [[WAChatStore shared] setCustomName:newName forJID:self.jid];
+        self.name = newName;
+        self.nameLabel.text = WADisplayNameForChat(self.jid, newName);
+        self.avatarView.image = [WATheme avatarForName:newName jid:self.jid diameter:84];
+        [self.table reloadData];
     }
 }
 

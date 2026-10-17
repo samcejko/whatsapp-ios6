@@ -166,6 +166,18 @@ BOOL WAIsRawNumberOrEmpty(NSString *name)
     if (!name || ![name isKindOfClass:[NSString class]]) return YES;
     NSString *trimmed = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!trimmed.length) return YES;
+
+    // Check placeholder strings and JID leaks
+    if ([trimmed isEqualToString:@"WhatsApp kontakt"] ||
+        [trimmed isEqualToString:@"WhatsApp contact"] ||
+        [trimmed isEqualToString:@"Skupina"] ||
+        [trimmed isEqualToString:@"Group"] ||
+        [trimmed rangeOfString:@"@lid"].location != NSNotFound ||
+        [trimmed rangeOfString:@"@s.whatsapp.net"].location != NSNotFound ||
+        [trimmed rangeOfString:@"@g.us"].location != NSNotFound) {
+        return YES;
+    }
+
     NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"0123456789+- ()"];
     if ([[trimmed stringByTrimmingCharactersInSet:allowed] length] == 0) {
         return YES;
@@ -177,12 +189,22 @@ NSString *WAFormatPhoneNumber(NSString *raw)
 {
     if (!raw.length) return @"";
     NSString *user = [raw componentsSeparatedByString:@"@"].firstObject ?: raw;
+
+    // Verified official Meta accounts
+    if ([user isEqualToString:@"447974905007"]) return @"Facebook";
+    if ([user isEqualToString:@"447723442982"]) return @"Instagram";
+    if ([user isEqualToString:@"0"]) return @"WhatsApp";
+
     NSMutableString *digits = [NSMutableString string];
     for (NSUInteger i = 0; i < user.length; i++) {
         unichar c = [user characterAtIndex:i];
         if (c >= '0' && c <= '9') [digits appendFormat:@"%C", c];
     }
     if (!digits.length) return raw;
+
+    if ([digits isEqualToString:@"447974905007"]) return @"Facebook";
+    if ([digits isEqualToString:@"447723442982"]) return @"Instagram";
+    if ([digits isEqualToString:@"0"]) return @"WhatsApp";
 
     // Czech (+420) / Slovak (+421)
     if (digits.length == 12 && ([digits hasPrefix:@"420"] || [digits hasPrefix:@"421"])) {
@@ -239,17 +261,22 @@ NSString *WADisplayNameForChat(NSString *jid, NSString *savedName)
         return savedName;
     }
 
-    // 2. If it's a group (@g.us), return savedName if present, else default
+    // 2. Verified Meta service accounts
+    NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    if ([user isEqualToString:@"447974905007"]) return @"Facebook";
+    if ([user isEqualToString:@"447723442982"]) return @"Instagram";
+    if ([user isEqualToString:@"0"]) return @"WhatsApp";
+
+    // 3. If it's a group (@g.us), return savedName if present, else default
     if ([jid rangeOfString:@"@g.us"].location != NSNotFound) {
         return (savedName.length && !WAIsRawNumberOrEmpty(savedName)) ? savedName : WALoc(@"group_default");
     }
 
-    // 3. Check AddressBook by phone number digits
-    NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    // 4. Check AddressBook by phone number digits
     NSString *ab = WAAddressBookNameForNumber(user);
     if (ab.length) return ab;
 
-    // 4. Format as phone number (or WhatsApp kontakt for LID)
+    // 5. Format as phone number (or WhatsApp kontakt for LID)
     return WAFormatPhoneNumber(jid);
 }
 

@@ -142,4 +142,7 @@
 "release_to_send" = "Release to send";
 "slide_to_cancel" = "Slide to cancel";
 "recording" = "Recording…";
+"edit_name" = "Edit Name";
+"edit_name_prompt" = "Enter a new name for this chat:";
+"save" = "Save";
 

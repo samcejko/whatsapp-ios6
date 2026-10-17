@@ -122,7 +122,7 @@ static void cb_node(void *ctx, const wa_node *node)
         int ok = wa_chat_handle_message_full(self->_client, self->_sessions, node, from, sizeof from, &live_msg, &hist, &is_history);
         wa_sess_save(self->_sessions, [sessionsPath() UTF8String]);
         send_ack(self, node, "message");
-        if (is_history && hist.nconvs > 0) {
+        if (is_history && (hist.nconvs > 0 || hist.npushnames > 0)) {
             NSMutableArray *convs = [NSMutableArray arrayWithCapacity:hist.nconvs];
             for (int i = 0; i < hist.nconvs; i++) {
                 wa_history_conv *cv = &hist.convs[i];
@@ -130,6 +130,7 @@ static void cb_node(void *ctx, const wa_node *node)
                 if (!jid) continue;   // stringWithUTF8String returns nil on invalid UTF-8; skip rather than crash
                 NSString *name = cv->name ? [NSString stringWithUTF8String:cv->name] : nil;
                 NSString *last = cv->last ? [NSString stringWithUTF8String:cv->last] : nil;
+                NSString *pnJid = cv->pn_jid ? [NSString stringWithUTF8String:cv->pn_jid] : nil;
                 NSMutableArray *msgs = [NSMutableArray arrayWithCapacity:cv->nmsgs];
                 for (int j = 0; j < cv->nmsgs; j++) {
                     wa_history_msg *mm = &cv->msgs[j];
@@ -156,12 +157,24 @@ static void cb_node(void *ctx, const wa_node *node)
                 [convs addObject:@{ @"jid": jid,
                                     @"name": name ?: @"",
                                     @"last": last ?: @"",
+                                    @"pnJid": pnJid ?: @"",
                                     @"ts": @(cv->timestamp),
                                     @"unread": @(cv->unread),
                                     @"messages": msgs }];
             }
+            NSMutableArray *pnames = [NSMutableArray arrayWithCapacity:hist.npushnames];
+            for (int k = 0; k < hist.npushnames; k++) {
+                NSString *pid = hist.pushnames[k].id ? [NSString stringWithUTF8String:hist.pushnames[k].id] : nil;
+                NSString *pn = hist.pushnames[k].pushname ? [NSString stringWithUTF8String:hist.pushnames[k].pushname] : nil;
+                if (pid.length && pn.length) {
+                    [pnames addObject:@{ @"id": pid, @"name": pn }];
+                }
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
-                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionConversations object:self userInfo:@{ @"conversations": convs }];
+                [[NSNotificationCenter defaultCenter] postNotificationName:WASessionConversations object:self userInfo:@{
+                    @"conversations": convs,
+                    @"pushnames": pnames
+                }];
             });
         }
         wa_history_result_free(&hist);
@@ -179,7 +192,13 @@ static void cb_node(void *ctx, const wa_node *node)
             if (live_msg.duration) md[@"dur"] = @(live_msg.duration);
             if (live_msg.filename) { NSString *fn = [NSString stringWithUTF8String:live_msg.filename]; if (fn) md[@"file"] = fn; }
             if (live_msg.thumb && live_msg.thumb_len) md[@"thumb"] = [NSData dataWithBytes:live_msg.thumb length:live_msg.thumb_len];
-            if (live_msg.sender) { NSString *sn = [NSString stringWithUTF8String:live_msg.sender]; if (sn.length) md[@"sender"] = sn; }
+            if (live_msg.sender) {
+                NSString *sn = [NSString stringWithUTF8String:live_msg.sender];
+                if (sn.length) {
+                    md[@"sender"] = sn;
+                    md[@"pushName"] = sn;
+                }
+            }
             if (live_msg.direct_path) { NSString *dp = [NSString stringWithUTF8String:live_msg.direct_path]; if (dp.length) md[@"dpath"] = dp; }
             if (live_msg.media_key && live_msg.media_key_len) md[@"mkey"] = [NSData dataWithBytes:live_msg.media_key length:live_msg.media_key_len];
             if (live_msg.enc_sha && live_msg.enc_sha_len) md[@"esha"] = [NSData dataWithBytes:live_msg.enc_sha length:live_msg.enc_sha_len];

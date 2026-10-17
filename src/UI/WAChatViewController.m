@@ -480,6 +480,7 @@
 {
     NSString *changed = n.userInfo[@"jid"];
     if (changed.length && ![changed isEqualToString:[WAChatStore keyForJID:self.jid]]) return;
+    self.title = WADisplayNameForChat(self.jid, nil);
     [self loadMessages];
     [self.table reloadData];
     [self scrollToBottom];

@@ -28,12 +28,16 @@
 #define F_HSN_INLINEPAYLOAD        11
 #define F_HS_SYNCTYPE               1
 #define F_HS_CONVERSATIONS          2
+#define F_HS_PUSHNAMES              7
+#define F_PUSHNAME_ID               1
+#define F_PUSHNAME_NAME             2
 #define F_CONV_ID                   1
 #define F_CONV_MESSAGES             2
 #define F_CONV_LASTMSGTS            5
 #define F_CONV_UNREAD               6
 #define F_CONV_TIMESTAMP           12
 #define F_CONV_NAME                13
+#define F_CONV_PNJID               29
 #define F_CONV_DISPLAYNAME         38
 #define F_HSM_MESSAGE               1
 #define F_WMI_KEY                    1
@@ -87,6 +91,7 @@ static void conv_free(wa_history_conv *c)
     free(c->jid);
     free(c->name);
     free(c->last);
+    free(c->pn_jid);
     for (int i = 0; i < c->nmsgs; i++) {
         free(c->msgs[i].text);
         free(c->msgs[i].id);
@@ -211,6 +216,13 @@ void wa_history_result_free(wa_history_result *r)
     free(r->convs);
     r->convs = NULL;
     r->nconvs = 0;
+    for (int i = 0; i < r->npushnames; i++) {
+        free(r->pushnames[i].id);
+        free(r->pushnames[i].pushname);
+    }
+    free(r->pushnames);
+    r->pushnames = NULL;
+    r->npushnames = 0;
 }
 
 // Parse one Conversation message into out. Returns 0 (out filled, caller owns the strings) or -1 (skip this one).
@@ -222,6 +234,7 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
     out->jid = id;
     out->name = pb_get_string(c, cl, F_CONV_NAME);
     if (!out->name) out->name = pb_get_string(c, cl, F_CONV_DISPLAYNAME);
+    out->pn_jid = pb_get_string(c, cl, F_CONV_PNJID);
 
     uint64_t ts = 0;
     if (pb_get_varint(c, cl, F_CONV_TIMESTAMP, &ts)) out->timestamp = ts;
@@ -301,20 +314,37 @@ int wa_history_parse(const uint8_t *data, size_t len, wa_history_result *out)
     pb_reader r;
     pb_reader_init(&r, data, len);
     pb_field f;
-    int cap = 0, rc;
+    int cap = 0, pncap = 0, rc;
     while ((rc = pb_next(&r, &f)) > 0) {
-        if (f.field != F_HS_CONVERSATIONS || f.wire != PB_BYTES) continue;
-        wa_history_conv conv;
-        if (parse_conversation(f.data, f.len, &conv) != 0) continue;
-        if (out->nconvs >= cap) {
-            int ncap = cap ? cap * 2 : 16;
-            wa_history_conv *p = (wa_history_conv *)realloc(out->convs, (size_t)ncap * sizeof *p);
-            if (!p) { conv_free(&conv); break; }
-            out->convs = p;
-            cap = ncap;
+        if (f.field == F_HS_CONVERSATIONS && f.wire == PB_BYTES) {
+            wa_history_conv conv;
+            if (parse_conversation(f.data, f.len, &conv) != 0) continue;
+            if (out->nconvs >= cap) {
+                int ncap = cap ? cap * 2 : 16;
+                wa_history_conv *p = (wa_history_conv *)realloc(out->convs, (size_t)ncap * sizeof *p);
+                if (!p) { conv_free(&conv); break; }
+                out->convs = p;
+                cap = ncap;
+            }
+            out->convs[out->nconvs++] = conv;
+            if (out->nconvs >= 4096) break;   // defensive cap
+        } else if (f.field == F_HS_PUSHNAMES && f.wire == PB_BYTES) {
+            char *pid = pb_get_string(f.data, f.len, F_PUSHNAME_ID);
+            char *pname = pb_get_string(f.data, f.len, F_PUSHNAME_NAME);
+            if (!pname) pname = pb_get_string(f.data, f.len, 3);
+            if (pid && pname && pname[0]) {
+                if (out->npushnames >= pncap) {
+                    int npcap = pncap ? pncap * 2 : 32;
+                    wa_history_pushname *np = (wa_history_pushname *)realloc(out->pushnames, (size_t)npcap * sizeof *np);
+                    if (!np) { free(pid); free(pname); break; }
+                    out->pushnames = np;
+                    pncap = npcap;
+                }
+                out->pushnames[out->npushnames].id = pid;
+                out->pushnames[out->npushnames].pushname = pname;
+                out->npushnames++;
+            } else { free(pid); free(pname); }
         }
-        out->convs[out->nconvs++] = conv;
-        if (out->nconvs >= 4096) break;   // defensive cap
     }
     if (rc < 0) wa_log("history: malformed HistorySync (parsed %d conversations before the error)", out->nconvs);
     return 0;
