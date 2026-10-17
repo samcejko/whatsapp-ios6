@@ -80,6 +80,7 @@
         [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:(self.video ? @selector(noop) : @selector(toggleSpeaker))];
     }
 
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallRinging:) name:WASessionCallRinging object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallAccepted:) name:WASessionCallAccepted object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallEnded:) name:WASessionCallEnded object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onCallAudioPacket:) name:WASessionCallAudioPacket object:nil];
@@ -129,6 +130,12 @@
         UILabel *cap = (UILabel *)[b viewWithTag:99];
         cap.frame = CGRectMake(-10, bd + 4, bd + 20, 16);
     }
+}
+
+- (void)onCallRinging:(NSNotification *)n
+{
+    if (self.connected) return;
+    self.statusLabel.text = WALoc(@"call_ringing");
 }
 
 - (void)onCallAccepted:(NSNotification *)n

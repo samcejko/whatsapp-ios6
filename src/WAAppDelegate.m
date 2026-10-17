@@ -268,6 +268,26 @@
         }
         return YES;
     }
+    if ([cmd isEqualToString:@"sendaudio"]) {
+        NSString *jid = nil, *file = nil;
+        for (NSString *kv in [url.query componentsSeparatedByString:@"&"]) {
+            NSArray *p = [kv componentsSeparatedByString:@"="];
+            if (p.count == 2) {
+                NSString *k = p[0], *v = [p[1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+                if ([k isEqualToString:@"jid"]) jid = v;
+                else if ([k isEqualToString:@"file"]) file = v;
+            }
+        }
+        if (!file.length) file = @"/var/mobile/Documents/wa6_aud_3EB00444A039DBD86C81.wav";
+        NSData *data = [NSData dataWithContentsOfFile:file];
+        WALog(@"debug sendaudio data=%lu bytes from file %@ to %@", (unsigned long)data.length, file, jid);
+        if (jid.length && data.length) {
+            NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+            [[WAChatStore shared] recordOutgoingAudioDuration:5 toJID:jid msgId:mid status:WAMessageStatusPending];
+            [[WASession shared] sendAudio:data duration:5 toJID:jid msgId:mid];
+        }
+        return YES;
+    }
     if ([cmd isEqualToString:@"calls"] && [self.window.rootViewController isKindOfClass:[UINavigationController class]]) {
         UINavigationController *nav = (UINavigationController *)self.window.rootViewController;
         [nav popToRootViewControllerAnimated:NO];

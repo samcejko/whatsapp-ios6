@@ -255,6 +255,7 @@ static int upload_media_blob(wa_client *c, const uint8_t *raw, size_t raw_len,
                              uint8_t media_key_out[32], uint8_t file_sha_out[32], uint8_t file_enc_sha_out[32],
                              char *direct_path_out, size_t dp_cap, char *media_url_out, size_t url_cap)
 {
+    wa_log("chat: requesting media_conn for %s upload (%zu bytes)", mms_type, raw_len);
     wa_node *iq = wa_node_new("iq");
     wa_node_attr(iq, "to", "@s.whatsapp.net");
     wa_node_attr(iq, "type", "set");
@@ -325,9 +326,11 @@ static int upload_media_blob(wa_client *c, const uint8_t *raw, size_t raw_len,
 
     char path[1024];
     snprintf(path, sizeof path, "/mms/%s/%s?auth=%s&token=%s", mms_type, b64_token, auth_copy, b64_token);
+    wa_log("chat: media upload POST to https://%s%s (%zu bytes)", hostname, path, ct.len);
     int http_st = 0;
     char *resp_json = wa_https_post(hostname, path, NULL, ct.data, ct.len, "application/octet-stream", 30000, &http_st);
     wa_buf_free(&ct);
+    wa_log("chat: media upload result http %d, response: %s", http_st, resp_json ? resp_json : "(null)");
     if (!resp_json || http_st < 200 || http_st >= 300) {
         wa_log("chat: media upload failed (http %d)", http_st);
         free(resp_json);

@@ -11,6 +11,7 @@ extern NSString *const WASessionMessageStatus;   // userInfo: @"id" (NSString), 
 extern NSString *const WASessionConversations;   // userInfo: @"conversations" (NSArray of @{jid,name,last,ts,unread}) from a history-sync chunk
 extern NSString *const WASessionPresenceChanged; // userInfo: @"jid" (NSString), @"state" (NSString: available/unavailable/composing/paused), @"last" (NSString, optional)
 extern NSString *const WASessionIncomingCall;    // userInfo: @"jid" (NSString), @"video" (NSNumber BOOL), @"callId" (NSString)
+extern NSString *const WASessionCallRinging;     // userInfo: @"callId" (NSString)
 extern NSString *const WASessionCallAccepted;    // userInfo: @"callId" (NSString)
 extern NSString *const WASessionCallEnded;       // userInfo: @"callId" (NSString), @"reason" (NSString, optional)
 extern NSString *const WASessionCallAudioPacket; // userInfo: @"payload" (NSData)

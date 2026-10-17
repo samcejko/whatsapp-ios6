@@ -395,23 +395,33 @@
     [self.micBtn setTitle:@"🎤" forState:UIControlStateNormal];
     [self.recordTimer invalidate];
     self.recordTimer = nil;
-    [self.recorder stop];
+
+    NSString *mid = [self.recordMsgId copy];
+    NSString *filePath = [self.recordFilePath copy];
+    NSString *chatJid = [self.jid copy];
+    self.recordMsgId = nil;
+    self.recordFilePath = nil;
+
+    AVAudioRecorder *rec = self.recorder;
     self.recorder = nil;
-    [[WASession shared] sendRecordingState:NO toJID:self.jid];
+    [rec stop];
+
+    [[WASession shared] sendRecordingState:NO toJID:chatJid];
     self.field.placeholder = WALoc(@"message_hint");
 
-    NSData *audioData = self.recordFilePath.length ? [NSData dataWithContentsOfFile:self.recordFilePath] : nil;
-    if (dur >= 0.6 && self.recordMsgId.length && audioData.length > 100) {
-        NSString *mid = self.recordMsgId;
-        uint32_t secs = (uint32_t)ceil(dur);
-        if (secs < 1) secs = 1;
-        [[WAChatStore shared] recordOutgoingAudioDuration:secs toJID:self.jid msgId:mid status:WAMessageStatusPending];
-        [[WASession shared] sendAudio:audioData duration:secs toJID:self.jid msgId:mid];
-        AudioServicesPlaySystemSound(1004);
-    } else if (self.recordFilePath.length) {
-        [[NSFileManager defaultManager] removeItemAtPath:self.recordFilePath error:nil];
-    }
-    self.recordMsgId = nil;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        (void)rec; // Keep rec alive until file is closed
+        NSData *audioData = filePath.length ? [NSData dataWithContentsOfFile:filePath] : nil;
+        if (dur >= 0.6 && mid.length && audioData.length > 100) {
+            uint32_t secs = (uint32_t)ceil(dur);
+            if (secs < 1) secs = 1;
+            [[WAChatStore shared] recordOutgoingAudioDuration:secs toJID:chatJid msgId:mid status:WAMessageStatusPending];
+            [[WASession shared] sendAudio:audioData duration:secs toJID:chatJid msgId:mid];
+            AudioServicesPlaySystemSound(1004);
+        } else if (filePath.length) {
+            [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
+        }
+    });
 }
 
 - (void)micTouchUpOutside

@@ -691,7 +691,7 @@ static int https_post_internal(const char *host, const char *path, const char *c
     char req[2048];
     snprintf(req, sizeof req,
              "POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-             "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+             "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36\r\nOrigin: https://web.whatsapp.com\r\nReferer: https://web.whatsapp.com/\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
              "Accept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
              path, host, content_type ? content_type : "application/octet-stream", body_len);
     char head[4096];

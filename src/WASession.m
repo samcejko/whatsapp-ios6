@@ -25,6 +25,7 @@ NSString *const WASessionConversations = @"WASessionConversations";
 NSString *const WASessionPresenceChanged = @"WASessionPresenceChanged";
 NSString *const WASessionIncomingCall = @"WASessionIncomingCall";
 NSString *const WASessionCallAccepted = @"WASessionCallAccepted";
+NSString *const WASessionCallRinging = @"WASessionCallRinging";
 NSString *const WASessionCallEnded = @"WASessionCallEnded";
 NSString *const WASessionCallAudioPacket = @"WASessionCallAudioPacket";
 
@@ -488,6 +489,19 @@ static void cb_node(void *ctx, const wa_node *node)
                         [[NSNotificationCenter defaultCenter] postNotificationName:WASessionMessageStatus object:self userInfo:ui];
                     });
                 }
+            }
+        } else if (cls && strcmp(cls, "call") == 0) {
+            if (self->_hasCurrentCall) {
+                if (wa_callengine_on_relay(node, &self->_currentCall)) {
+                    WALog(@"call: received relay info in ack, starting media transport");
+                    start_call_media(self);
+                }
+                NSString *cid = [NSString stringWithUTF8String:self->_currentCall.call_id];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[NSNotificationCenter defaultCenter] postNotificationName:WASessionCallRinging
+                                                                        object:self
+                                                                      userInfo:@{ @"callId": (cid ?: @"") }];
+                });
             }
         }
     }
@@ -1325,14 +1339,19 @@ static void action_fetch_picture(wa_client *c, void *ctx)
     wa_presence_ctx *p = (wa_presence_ctx *)ctx;
     char bare[80] = {0};
     wa_jid_to_non_ad(p->jid, bare, sizeof bare);
+    const char *target_jid = bare[0] ? bare : p->jid;
     wa_node *iq = wa_node_new("iq");
     wa_node_attr(iq, "id", p->state[0] ? p->state : "pic_req");
-    wa_node_attr(iq, "to", "@s.whatsapp.net");
-    wa_node_attr(iq, "target", bare[0] ? bare : p->jid);
+    if (strstr(target_jid, "@g.us")) {
+        wa_node_attr(iq, "to", target_jid);
+    } else {
+        wa_node_attr(iq, "to", "@s.whatsapp.net");
+        wa_node_attr(iq, "target", target_jid);
+    }
     wa_node_attr(iq, "type", "get");
     wa_node_attr(iq, "xmlns", "w:profile:picture");
     wa_node *pic = wa_node_add_new(iq, "picture");
-    wa_node_attr(pic, "type", "preview");
+    wa_node_attr(pic, "type", "image");
     wa_node_attr(pic, "query", "url");
     wa_client_send(c, iq);
     wa_node_free(iq);
