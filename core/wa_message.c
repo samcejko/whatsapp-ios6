@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 int wa_msg_text_plaintext(const char *text, wa_buf *out)
 {

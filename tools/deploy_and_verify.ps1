@@ -69,7 +69,7 @@ Write-Host "Triggering refresh and screenshot on iPad..."
 
 Start-Sleep -Seconds 2
 
-$destPng = "C:\Users\samcejko\.gemini\antigravity\brain\b8c192ce-d3b3-405d-975a-3056f8d4103d\shot-ipad-chats-verified.png"
+$destPng = "C:\Users\samcejko\.gemini\antigravity\brain\5e073f8c-194b-4481-a305-d824a4e7220d\shot-ipad-chats-verified.png"
 Write-Host "Fetching screenshot to $destPng..."
 & scp @sshOpts "root@${ipad}:/var/mobile/Documents/wa6-shot.png" $destPng
 
