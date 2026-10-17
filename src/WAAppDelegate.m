@@ -243,7 +243,7 @@
         return YES;
     }
     if ([cmd isEqualToString:@"endcall"]) {
-        [[WASession shared] endCall];
+        [[WASession shared] terminateCall];
         if (self.window.rootViewController.presentedViewController) {
             [self.window.rootViewController dismissViewControllerAnimated:NO completion:nil];
         }
