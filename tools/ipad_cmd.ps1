@@ -13,7 +13,7 @@ $sshOpts = @('-i', $sshKey, '-o', 'StrictHostKeyChecking=no', '-o', 'HostKeyAlgo
 
 if ($Url -and $Url.Length -gt 0) {
     Write-Host "Opening URL on iPad: $Url"
-    & ssh @sshOpts root@$ipad "uiopen `"$Url`""
+    & ssh @sshOpts root@$ipad "uiopen '$Url'"
 }
 
 if ($Cmd -and $Cmd.Length -gt 0) {

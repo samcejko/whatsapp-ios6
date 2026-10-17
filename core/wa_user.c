@@ -21,8 +21,11 @@ wa_node *wa_user_build_devices_iq(const char *const *user_jids, int n, const cha
     wa_node_attr(usync, "context", "message");
     wa_node *query = wa_node_add_new(usync, "query");
     wa_node_attr(wa_node_add_new(query, "devices"), "version", "2");
-    wa_node_add_new(query, "lid");
-    wa_node_add_new(query, "pn");
+    int has_pn = 0;
+    for (int i = 0; i < n; i++) {
+        if (strstr(user_jids[i], "@s.whatsapp.net")) { has_pn = 1; break; }
+    }
+    if (has_pn) wa_node_add_new(query, "lid");
     wa_node *list = wa_node_add_new(usync, "list");
     for (int i = 0; i < n; i++) {
         wa_node *u = wa_node_add_new(list, "user");
