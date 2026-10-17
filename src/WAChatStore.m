@@ -607,9 +607,12 @@ static NSString *msgSig(NSDictionary *m)
     if (!mid.length) return;
     BOOL changed = NO;
     NSString *changedKey = nil;
-    for (NSString *key in self.chats) {
+    for (NSString *key in [self.chats allKeys]) {
+        if ([key hasPrefix:@"_"]) continue;
         NSMutableDictionary *e = self.chats[key];
+        if (![e isKindOfClass:[NSMutableDictionary class]]) continue;
         NSMutableArray *msgs = e[@"msgs"];
+        if (![msgs isKindOfClass:[NSMutableArray class]]) continue;
         for (int i = (int)msgs.count - 1; i >= 0; i--) {
             id mObj = msgs[i];
             if (![mObj isKindOfClass:[NSDictionary class]]) continue;
@@ -800,8 +803,10 @@ static NSString *msgSig(NSDictionary *m)
 
 - (void)clearAllChats
 {
-    for (NSString *key in self.chats) {
+    for (NSString *key in [self.chats allKeys]) {
+        if ([key hasPrefix:@"_"]) continue;
         NSMutableDictionary *e = self.chats[key];
+        if (![e isKindOfClass:[NSMutableDictionary class]]) continue;
         NSMutableArray *msgs = e[@"msgs"];
         if ([msgs isKindOfClass:[NSMutableArray class]]) {
             [msgs removeAllObjects];
