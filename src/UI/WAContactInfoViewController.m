@@ -416,7 +416,7 @@
             }
         } else if (buttonIndex == 1) { // Message
             if (self.selectedParticipant.length) {
-                WAChatViewController *cv = [[WAChatViewController alloc] initWithJID:self.selectedParticipant title:WADisplayNameForChat(self.selectedParticipant, nil)];
+                WAChatViewController *cv = [[WAChatViewController alloc] initWithJID:self.selectedParticipant name:WADisplayNameForChat(self.selectedParticipant, nil)];
                 [self.navigationController pushViewController:cv animated:YES];
             }
         } else if (buttonIndex == 2) { // Voice Call

@@ -38,6 +38,7 @@ typedef NS_ENUM(NSInteger, WACallButtonType) {
 + (UIImage *)muteIconWithColor:(UIColor *)color size:(CGSize)size;
 + (UIImage *)clockIconWithColor:(UIColor *)color size:(CGSize)size;
 + (UIImage *)starIconWithColor:(UIColor *)color size:(CGSize)size;
++ (UIImage *)contactIconWithColor:(UIColor *)color size:(CGSize)size;
 
 // A circular avatar: a colour derived from the jid, with the name's initials (or a group glyph for @g.us jids).
 + (UIImage *)avatarForName:(NSString *)name jid:(NSString *)jid diameter:(CGFloat)d;

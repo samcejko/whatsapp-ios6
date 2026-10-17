@@ -3,6 +3,7 @@
 // reads: it ingests history-sync conversations and live incoming messages (observed) and records outgoing ones, then
 // posts WAChatStoreChanged so the open view controllers reload.
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 extern NSString *const WAChatStoreChanged;   // userInfo may carry @"jid" (canonical) when a single chat changed
 

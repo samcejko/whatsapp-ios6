@@ -536,4 +536,28 @@
     return img;
 }
 
++ (UIImage *)contactIconWithColor:(UIColor *)color size:(CGSize)size
+{
+    UIGraphicsBeginImageContextWithOptions(size, NO, 0);
+    CGContextRef c = UIGraphicsGetCurrentContext();
+    [color setFill];
+    CGFloat w = size.width, h = size.height;
+    CGFloat hr = w * 0.22;
+    CGContextFillEllipseInRect(c, CGRectMake(w / 2 - hr, h * 0.10, hr * 2, hr * 2));
+
+    UIBezierPath *sh = [UIBezierPath bezierPath];
+    CGFloat sw = w * 0.74, shh = h * 0.42;
+    CGFloat sx = (w - sw) / 2, sy = h * 0.52;
+    [sh moveToPoint:CGPointMake(sx, sy + shh)];
+    [sh addCurveToPoint:CGPointMake(sx + sw, sy + shh)
+          controlPoint1:CGPointMake(sx, sy)
+          controlPoint2:CGPointMake(sx + sw, sy)];
+    [sh closePath];
+    [sh fill];
+
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return img;
+}
+
 @end
