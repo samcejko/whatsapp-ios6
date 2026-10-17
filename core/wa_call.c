@@ -73,7 +73,7 @@ static wa_node *action_node(const char *tag, const char *call_id, const char *ca
     return a;
 }
 
-static wa_node *destination_to(const char *const *jids, int n)
+static __attribute__((unused)) wa_node *destination_to(const char *const *jids, int n)
 {
     wa_node *d = wa_node_new("destination");
     for (int i = 0; i < n; i++) {

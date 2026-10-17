@@ -9,7 +9,20 @@
 #include "wa_net.h"
 #include "wa_crypto.h"
 #include "wa_proto.h"
+#if defined(__has_include)
+#if __has_include("opus.h")
 #include "opus.h"
+#define HAVE_OPUS 1
+#elif __has_include(<opus/opus.h>)
+#include <opus/opus.h>
+#define HAVE_OPUS 1
+#else
+#define HAVE_OPUS 0
+#endif
+#else
+#include "opus.h"
+#define HAVE_OPUS 1
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -458,6 +471,7 @@ static void ogg_write_page(wa_buf *out, uint8_t hdr_type, uint64_t granule, uint
 
 static int wav_to_ogg_opus(const uint8_t *wav, size_t wav_len, wa_buf *ogg_out, uint32_t *out_seconds)
 {
+#if HAVE_OPUS
     if (!wav || wav_len < 44 || memcmp(wav, "RIFF", 4) != 0 || memcmp(wav + 8, "WAVE", 4) != 0)
         return -1;
     uint32_t sr = 16000;
@@ -544,6 +558,10 @@ static int wav_to_ogg_opus(const uint8_t *wav, size_t wav_len, wa_buf *ogg_out, 
         *out_seconds = sec;
     }
     return ogg_out->len > 64 ? 0 : -1;
+#else
+    (void)wav; (void)wav_len; (void)ogg_out; (void)out_seconds;
+    return -1;
+#endif
 }
 
 int wa_chat_send_audio(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
@@ -661,12 +679,12 @@ static void send_retry_receipt(wa_client *c, const wa_node *message, const char 
     wa_node_set_bytes(wa_node_add_new(keys, "type"), &ktype, 1);
     wa_node_set_bytes(wa_node_add_new(keys, "identity"), d->identity_key.pub, 32);
 
-    if (d->n_prekeys > 0) {
+    if (d->one_time_count > 0) {
         wa_node *key = wa_node_add_new(keys, "key");
-        uint32_t pk_id = d->prekeys[0].id;
+        uint32_t pk_id = d->one_time[0].id;
         uint8_t pk_id3[3] = { (uint8_t)(pk_id >> 16), (uint8_t)(pk_id >> 8), (uint8_t)pk_id };
         wa_node_set_bytes(wa_node_add_new(key, "id"), pk_id3, 3);
-        wa_node_set_bytes(wa_node_add_new(key, "value"), d->prekeys[0].pair.pub, 32);
+        wa_node_set_bytes(wa_node_add_new(key, "value"), d->one_time[0].key.pub, 32);
     }
 
     wa_node *skey = wa_node_add_new(keys, "skey");
