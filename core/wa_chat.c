@@ -196,22 +196,49 @@ int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char 
     return rc;
 }
 
+int wa_chat_send_ext_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text,
+                          const char *quoted_id, const char *quoted_sender, const char *quoted_text,
+                          const char *msg_id, char *out_msg_id, size_t out_msg_id_cap)
+{
+    wa_buf pt;
+    wa_buf_init(&pt);
+    if (wa_msg_ext_text_plaintext(text, quoted_id, quoted_sender, quoted_text, &pt) != 0) {
+        wa_buf_free(&pt);
+        return -1;
+    }
+    int rc = wa_chat_send_message_payload(c, sessions, to_user_jid, pt.data, pt.len, msg_id, out_msg_id, out_msg_id_cap);
+    wa_buf_free(&pt);
+    return rc;
+}
+
+int wa_chat_send_reaction(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
+                          const char *target_msg_id, int target_from_me, const char *emoji)
+{
+    if (!c || !sessions || !to_user_jid || !target_msg_id) return -1;
+    wa_buf pt;
+    wa_buf_init(&pt);
+    int64_t ts_ms = (int64_t)wa_now_sec() * 1000LL;
+    if (wa_msg_reaction_plaintext(target_msg_id, to_user_jid, target_from_me, emoji, ts_ms, &pt) != 0) {
+        wa_buf_free(&pt);
+        return -1;
+    }
+    int rc = wa_chat_send_message_payload(c, sessions, to_user_jid, pt.data, pt.len, NULL, NULL, 0);
+    wa_buf_free(&pt);
+    return rc;
+}
+
 int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text)
 {
     return wa_chat_send_text_with_id(c, sessions, to_user_jid, text, NULL, NULL, 0);
 }
 
-int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
-                       const uint8_t *jpeg, size_t jpeg_len,
-                       const uint8_t *thumb, size_t thumb_len,
-                       const char *caption,
-                       const char *msg_id, char *out_msg_id, size_t out_msg_id_cap)
+static int upload_media_blob(wa_client *c, const uint8_t *raw, size_t raw_len,
+                             const char *hkdf_info, const char *mms_type,
+                             uint8_t media_key_out[32], uint8_t file_sha_out[32], uint8_t file_enc_sha_out[32],
+                             char *direct_path_out, size_t dp_cap, char *media_url_out, size_t url_cap)
 {
-    if (!c || !sessions || !to_user_jid || !jpeg || !jpeg_len) return -1;
-
-    // 1. Query media_conn for upload hostname and auth token
     wa_node *iq = wa_node_new("iq");
-    wa_node_attr(iq, "to", "s.whatsapp.net");
+    wa_node_attr(iq, "to", "@s.whatsapp.net");
     wa_node_attr(iq, "type", "set");
     wa_node_attr(iq, "xmlns", "w:m");
     wa_node_add_new(iq, "media_conn");
@@ -240,23 +267,20 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
     snprintf(auth_copy, sizeof auth_copy, "%s", auth);
     wa_node_free(res);
 
-    // 2. Generate random 32-byte media key and derive keys
-    uint8_t media_key[32];
-    wa_random(media_key, sizeof media_key);
+    wa_random(media_key_out, 32);
 
     uint8_t exp[112];
-    if (wa_hkdf_sha256(NULL, 0, media_key, 32, "WhatsApp Image Keys", 19, exp, 112) != 0) {
-        wa_log("chat: hkdf for image failed");
+    if (wa_hkdf_sha256(NULL, 0, media_key_out, 32, hkdf_info, strlen(hkdf_info), exp, 112) != 0) {
+        wa_log("chat: hkdf for %s failed", mms_type);
         return -1;
     }
     const uint8_t *iv = exp;
     const uint8_t *cipher_key = exp + 16;
     const uint8_t *mac_key = exp + 48;
 
-    // 3. Encrypt image bytes with AES-256-CBC and append 10-byte HMAC
     wa_buf ct;
     wa_buf_init(&ct);
-    if (wa_aes_cbc_encrypt(cipher_key, iv, jpeg, jpeg_len, &ct) != 0) {
+    if (wa_aes_cbc_encrypt(cipher_key, iv, raw, raw_len, &ct) != 0) {
         wa_buf_free(&ct);
         wa_log("chat: aes cbc encrypt failed");
         return -1;
@@ -268,13 +292,11 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
     wa_hmac_sha256_v(mac_key, 32, 2, parts, lens, mac);
     wa_buf_append(&ct, mac, 10);
 
-    // 4. Compute file SHA-256 and encrypted file SHA-256
-    uint8_t file_sha[32], file_enc_sha[32];
-    wa_sha256(jpeg, jpeg_len, file_sha);
-    wa_sha256(ct.data, ct.len, file_enc_sha);
+    wa_sha256(raw, raw_len, file_sha_out);
+    wa_sha256(ct.data, ct.len, file_enc_sha_out);
 
     char b64_token[64];
-    size_t b64_len = wa_base64_encode(file_enc_sha, 32, b64_token, sizeof b64_token);
+    size_t b64_len = wa_base64_encode(file_enc_sha_out, 32, b64_token, sizeof b64_token);
     for (size_t i = 0; i < b64_len; i++) {
         if (b64_token[i] == '+') b64_token[i] = '-';
         else if (b64_token[i] == '/') b64_token[i] = '_';
@@ -283,9 +305,8 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
         b64_token[--b64_len] = 0;
     }
 
-    // 5. POST to MMS upload endpoint
     char path[1024];
-    snprintf(path, sizeof path, "/mms/image/%s?auth=%s&token=%s", b64_token, auth_copy, b64_token);
+    snprintf(path, sizeof path, "/mms/%s/%s?auth=%s&token=%s", mms_type, b64_token, auth_copy, b64_token);
     int http_st = 0;
     char *resp_json = wa_https_post(hostname, path, NULL, ct.data, ct.len, "application/octet-stream", 30000, &http_st);
     wa_buf_free(&ct);
@@ -295,40 +316,55 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
         return -1;
     }
 
-    // 6. Extract direct_path and url from response JSON
-    char direct_path[256] = { 0 };
-    char media_url[512] = { 0 };
+    if (direct_path_out && dp_cap) direct_path_out[0] = 0;
+    if (media_url_out && url_cap) media_url_out[0] = 0;
     char *dp_ptr = strstr(resp_json, "\"direct_path\":\"");
-    if (dp_ptr) {
+    if (dp_ptr && direct_path_out && dp_cap) {
         dp_ptr += 15;
         char *dp_end = strchr(dp_ptr, '"');
         if (dp_end) {
             size_t n = (size_t)(dp_end - dp_ptr);
-            if (n < sizeof direct_path) {
-                memcpy(direct_path, dp_ptr, n);
-                direct_path[n] = 0;
+            if (n < dp_cap) {
+                memcpy(direct_path_out, dp_ptr, n);
+                direct_path_out[n] = 0;
             }
         }
     }
     char *url_ptr = strstr(resp_json, "\"url\":\"");
-    if (url_ptr) {
+    if (url_ptr && media_url_out && url_cap) {
         url_ptr += 7;
         char *url_end = strchr(url_ptr, '"');
         if (url_end) {
             size_t n = (size_t)(url_end - url_ptr);
-            if (n < sizeof media_url) {
-                memcpy(media_url, url_ptr, n);
-                media_url[n] = 0;
+            if (n < url_cap) {
+                memcpy(media_url_out, url_ptr, n);
+                media_url_out[n] = 0;
             }
         }
     }
     free(resp_json);
-    if (!direct_path[0]) {
+    if (!direct_path_out || !direct_path_out[0]) {
         wa_log("chat: upload response missing direct_path");
         return -1;
     }
+    return 0;
+}
 
-    // 7. Build ImageMessage protobuf
+int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
+                       const uint8_t *jpeg, size_t jpeg_len,
+                       const uint8_t *thumb, size_t thumb_len,
+                       const char *caption,
+                       const char *msg_id, char *out_msg_id, size_t out_msg_id_cap)
+{
+    if (!c || !sessions || !to_user_jid || !jpeg || !jpeg_len) return -1;
+
+    uint8_t media_key[32], file_sha[32], file_enc_sha[32];
+    char direct_path[256] = { 0 }, media_url[512] = { 0 };
+    if (upload_media_blob(c, jpeg, jpeg_len, "WhatsApp Image Keys", "image",
+                          media_key, file_sha, file_enc_sha,
+                          direct_path, sizeof direct_path, media_url, sizeof media_url) != 0)
+        return -1;
+
     wa_buf img;
     wa_buf_init(&img);
     if (media_url[0]) pb_put_string(&img, 1, media_url);
@@ -341,11 +377,46 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
     pb_put_string(&img, 11, direct_path);
     if (thumb && thumb_len) pb_put_bytes(&img, 16, thumb, thumb_len);
 
-    // 8. Wrap into Message (field 3 = imageMessage)
     wa_buf msg;
     wa_buf_init(&msg);
     pb_put_message(&msg, 3, &img);
     wa_buf_free(&img);
+
+    int rc = wa_chat_send_message_payload(c, sessions, to_user_jid, msg.data, msg.len, msg_id, out_msg_id, out_msg_id_cap);
+    wa_buf_free(&msg);
+    return rc;
+}
+
+int wa_chat_send_audio(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
+                       const uint8_t *audio, size_t audio_len,
+                       uint32_t seconds, const char *mimetype,
+                       const char *msg_id, char *out_msg_id, size_t out_msg_id_cap)
+{
+    if (!c || !sessions || !to_user_jid || !audio || !audio_len) return -1;
+
+    uint8_t media_key[32], file_sha[32], file_enc_sha[32];
+    char direct_path[256] = { 0 }, media_url[512] = { 0 };
+    if (upload_media_blob(c, audio, audio_len, "WhatsApp Audio Keys", "audio",
+                          media_key, file_sha, file_enc_sha,
+                          direct_path, sizeof direct_path, media_url, sizeof media_url) != 0)
+        return -1;
+
+    wa_buf aud;
+    wa_buf_init(&aud);
+    if (media_url[0]) pb_put_string(&aud, 1, media_url);
+    pb_put_string(&aud, 2, (mimetype && mimetype[0]) ? mimetype : "audio/mp4");
+    pb_put_bytes(&aud, 3, file_sha, 32);
+    pb_put_varint(&aud, 4, (uint64_t)audio_len);
+    pb_put_varint(&aud, 5, (uint64_t)(seconds > 0 ? seconds : 1));
+    pb_put_varint(&aud, 6, 1); // ptt = true
+    pb_put_bytes(&aud, 7, media_key, 32);
+    pb_put_bytes(&aud, 8, file_enc_sha, 32);
+    pb_put_string(&aud, 9, direct_path);
+
+    wa_buf msg;
+    wa_buf_init(&msg);
+    pb_put_message(&msg, 8, &aud); // Message.audioMessage = 8
+    wa_buf_free(&aud);
 
     int rc = wa_chat_send_message_payload(c, sessions, to_user_jid, msg.data, msg.len, msg_id, out_msg_id, out_msg_id_cap);
     wa_buf_free(&msg);
@@ -393,6 +464,9 @@ int wa_chat_handle_message_full(wa_client *c, wa_sess_store *sessions, const wa_
     if (!wa_msg_parse_incoming(message, &in) || !in.from) return 0;
     wa_jid_to_non_ad(in.from, frombuf, fromcap);
 
+    const char *part = wa_node_get(message, "participant");
+    const char *sender_dev_jid = (part && part[0]) ? part : in.from;
+
     wa_sig_keypair id, spk;
     our_identity(c, &id);
     our_signed_prekey(c, &spk);
@@ -415,14 +489,14 @@ int wa_chat_handle_message_full(wa_client *c, wa_sess_store *sessions, const wa_
     }
 
     wa_sig_session fresh;
-    wa_sig_session *s = wa_sess_get(sessions, in.from);
+    wa_sig_session *s = wa_sess_get(sessions, sender_dev_jid);
     wa_sig_session *use = s;
     if (is_prekey || !use) { use = &fresh; if (s) fresh = *s; else memset(&fresh, 0, sizeof fresh); }
 
     wa_buf msg;
     wa_buf_init(&msg);
     int rc = wa_msg_decrypt(use, &id, &spk, otp_ptr, is_prekey, in.enc, in.enc_len, &msg);
-    if (rc == 0) wa_sess_put(sessions, in.from, use);   // persist the advanced/established session
+    if (rc == 0) wa_sess_put(sessions, sender_dev_jid, use);   // persist the advanced/established session
 
     // A linked device's initial history arrives as a peer protocolMessage/historySyncNotification.
     if (rc == 0 && hist) {
@@ -437,18 +511,40 @@ int wa_chat_handle_message_full(wa_client *c, wa_sess_store *sessions, const wa_
 
     int ret = 0;
     if (rc == 0 && out_msg) {
-        if (wa_history_msg_parse(msg.data, msg.len, out_msg)) {
+        char *dsm_dest = wa_msg_parse_dsm_dest(msg.data, msg.len);
+        int is_dsm = 0;
+        if (dsm_dest && dsm_dest[0]) {
+            wa_jid_to_non_ad(dsm_dest, frombuf, fromcap);
+            is_dsm = 1;
+        }
+        free(dsm_dest);
+
+        char react_tid[96] = {0}, react_emoji[32] = {0};
+        if (wa_msg_parse_reaction(msg.data, msg.len, react_tid, sizeof react_tid, react_emoji, sizeof react_emoji)) {
+            out_msg->kind = WA_MSG_REACTION;
+            out_msg->quoted_id = wa_strdup(react_tid);
+            out_msg->text = wa_strdup(react_emoji);
+            out_msg->from_me = is_dsm;
+            ret = 1;
+        } else if (wa_history_msg_parse(msg.data, msg.len, out_msg)) {
             if (!out_msg->id && in.id) out_msg->id = wa_strdup(in.id);
             const char *t_str = wa_node_get(message, "t");
             if (t_str && out_msg->timestamp == 0) out_msg->timestamp = (uint64_t)strtoull(t_str, NULL, 10);
-            if (in.notify && !out_msg->sender) out_msg->sender = wa_strdup(in.notify);
+            if (is_dsm) {
+                out_msg->from_me = 1;
+            } else if (in.notify && !out_msg->sender) {
+                out_msg->sender = wa_strdup(in.notify);
+            }
             ret = 1;
         }
     }
 
-    // Send delivery receipt back to sender so they get the double checkmark ✓✓
-    const char *part = wa_node_get(message, "participant");
-    send_delivery_receipt(c, in.from, in.id, part);
+    if (rc == 0) {
+        // Send delivery receipt back to sender only when decryption succeeded
+        send_delivery_receipt(c, in.from, in.id, part);
+    } else {
+        wa_log("chat: decrypt failed (rc=%d) from=%s id=%s type=%s", rc, in.from, in.id ? in.id : "?", in.enc_type);
+    }
 
     wa_buf_free(&msg);
     return ret;

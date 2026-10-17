@@ -7,6 +7,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 
 @interface WASettingsViewController () <UIActionSheetDelegate>
+@property (nonatomic, strong) UIImageView *profileAvatarView;
 @property (nonatomic, strong) UILabel *statusSub;
 @property (nonatomic, strong) NSArray *blockedList;
 @end
@@ -28,20 +29,21 @@
 
     // profile header: avatar + own number
     NSString *jid = [WASession shared].ownJID ?: @"";
-    if (jid.length) {
-        NSString *key = [WAChatStore keyForJID:jid];
-        NSString *p = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:p]) {
-            [[WASession shared] fetchProfilePicture:jid];
-        }
-    }
     NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
     NSString *num = [user componentsSeparatedByString:@":"].firstObject;
+    NSString *bareJid = num.length ? [num stringByAppendingString:@"@s.whatsapp.net"] : jid;
+    if (bareJid.length) {
+        NSString *key = [WAChatStore keyForJID:bareJid];
+        NSString *p = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:p]) {
+            [[WASession shared] fetchProfilePicture:bareJid];
+        }
+    }
     CGFloat w = self.view.bounds.size.width;
     UIView *hdr = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, 108)];
-    UIImageView *av = [[UIImageView alloc] initWithFrame:CGRectMake(18, 22, 64, 64)];
-    av.image = [WATheme avatarForName:WALoc(@"app_name") jid:(jid.length ? jid : @"wazzup") diameter:64];
-    [hdr addSubview:av];
+    self.profileAvatarView = [[UIImageView alloc] initWithFrame:CGRectMake(18, 22, 64, 64)];
+    self.profileAvatarView.image = [WATheme avatarForName:WALoc(@"app_name") jid:(bareJid.length ? bareJid : @"wazzup") diameter:64];
+    [hdr addSubview:self.profileAvatarView];
     UILabel *nl = [[UILabel alloc] initWithFrame:CGRectMake(96, 36, w - 110, 26)];
     nl.font = [UIFont boldSystemFontOfSize:21];
     nl.text = num.length ? [@"+" stringByAppendingString:num] : WALoc(@"profile");
@@ -57,7 +59,17 @@
     [self.view addSubview:_table];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateStatusText) name:WASessionStateChanged object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
     [self updateStatusText];
+}
+
+- (void)onStoreChanged:(NSNotification *)n
+{
+    NSString *jid = [WASession shared].ownJID ?: @"";
+    NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    NSString *num = [user componentsSeparatedByString:@":"].firstObject;
+    NSString *bareJid = num.length ? [num stringByAppendingString:@"@s.whatsapp.net"] : @"wazzup";
+    self.profileAvatarView.image = [WATheme avatarForName:WALoc(@"app_name") jid:bareJid diameter:64];
 }
 
 - (void)updateStatusText

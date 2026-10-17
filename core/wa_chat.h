@@ -21,6 +21,15 @@ int wa_chat_send_text(wa_client *c, wa_sess_store *sessions, const char *to_user
 int wa_chat_send_text_with_id(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text,
                              const char *msg_id, char *out_msg_id, size_t out_msg_id_cap);
 
+// Send a text message with quoted reply contextInfo (ExtendedTextMessage).
+int wa_chat_send_ext_text(wa_client *c, wa_sess_store *sessions, const char *to_user_jid, const char *text,
+                          const char *quoted_id, const char *quoted_sender, const char *quoted_text,
+                          const char *msg_id, char *out_msg_id, size_t out_msg_id_cap);
+
+// Send a ReactionMessage (emoji reaction to target_msg_id).
+int wa_chat_send_reaction(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
+                          const char *target_msg_id, int target_from_me, const char *emoji);
+
 // Send a raw pre-encoded protobuf Message payload to a contact's devices (with DSM to own devices).
 int wa_chat_send_message_payload(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
                                  const uint8_t *msg_bytes, size_t msg_len,
@@ -31,6 +40,12 @@ int wa_chat_send_image(wa_client *c, wa_sess_store *sessions, const char *to_use
                        const uint8_t *jpeg, size_t jpeg_len,
                        const uint8_t *thumb, size_t thumb_len,
                        const char *caption,
+                       const char *msg_id, char *out_msg_id, size_t out_msg_id_cap);
+
+// Upload and send a voice note / audio clip to a contact. Encrypts media, uploads to CDN, creates AudioMessage and fans out.
+int wa_chat_send_audio(wa_client *c, wa_sess_store *sessions, const char *to_user_jid,
+                       const uint8_t *audio, size_t audio_len,
+                       uint32_t seconds, const char *mimetype,
                        const char *msg_id, char *out_msg_id, size_t out_msg_id_cap);
 
 // Decrypt an incoming <message> and route it. Writes the sender's bare JID into frombuf (>=80).

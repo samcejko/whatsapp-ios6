@@ -410,7 +410,14 @@ static void write_node(enc *e, const wa_node *n)
     write_string(e, n->tag, strlen(n->tag));
     for (int i = 0; i < n->nattrs; i++) {
         write_string(e, n->keys[i], strlen(n->keys[i]));
-        write_string(e, n->vals[i], strlen(n->vals[i]));
+        if (strcmp(n->vals[i], "s.whatsapp.net") == 0 &&
+            (strcmp(n->keys[i], "to") == 0 || strcmp(n->keys[i], "from") == 0 ||
+             strcmp(n->keys[i], "target") == 0 || strcmp(n->keys[i], "jid") == 0 ||
+             strcmp(n->keys[i], "participant") == 0)) {
+            write_string(e, "@s.whatsapp.net", 15);
+        } else {
+            write_string(e, n->vals[i], strlen(n->vals[i]));
+        }
     }
     if (n->nchildren > 0) {
         write_list_start(e, (size_t)n->nchildren);

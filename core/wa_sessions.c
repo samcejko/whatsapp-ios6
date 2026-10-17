@@ -28,7 +28,12 @@ int wa_sess_put(wa_sess_store *s, const char *jid, const wa_sig_session *sess)
     if (strlen(jid) >= sizeof s->entries[0].jid) return -1;
     int i = find(s, jid);
     if (i < 0) for (i = 0; i < WA_SESS_MAX; i++) if (!s->entries[i].used) break;
-    if (i >= WA_SESS_MAX) return -1;
+    if (i >= WA_SESS_MAX) {
+        memmove(&s->entries[0], &s->entries[1], (WA_SESS_MAX - 1) * sizeof(s->entries[0]));
+        i = WA_SESS_MAX - 1;
+        memset(&s->entries[i], 0, sizeof(s->entries[i]));
+        if (s->count > 0) s->count--;
+    }
     if (!s->entries[i].used) { s->count++; s->entries[i].used = 1; snprintf(s->entries[i].jid, sizeof s->entries[i].jid, "%s", jid); }
     s->entries[i].sess = *sess;
     return 0;

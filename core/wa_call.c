@@ -53,7 +53,14 @@ static wa_node *call_wrap(const char *to, const char *wrapper_id, wa_node *actio
 {
     wa_node *call = wa_node_new("call");
     wa_node_attr(call, "to", to);
-    if (wrapper_id) wa_node_attr(call, "id", wrapper_id);
+    if (wrapper_id && wrapper_id[0]) {
+        wa_node_attr(call, "id", wrapper_id);
+    } else {
+        char gen_id[33];
+        wa_call_new_id(gen_id, sizeof gen_id);
+        gen_id[20] = 0;
+        wa_node_attr(call, "id", gen_id);
+    }
     wa_node_add(call, action);
     return call;
 }

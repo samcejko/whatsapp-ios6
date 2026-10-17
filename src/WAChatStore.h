@@ -82,8 +82,9 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 - (void)setContact:(NSString *)jid blocked:(BOOL)blocked;
 - (NSArray *)blockedContacts;
 
-// Group participants
+// Group participants & metadata
 - (NSArray *)participantsForGroup:(NSString *)jid;
+- (void)setParticipants:(NSArray *)participants forGroup:(NSString *)groupJID subject:(NSString *)subject;
 - (void)addParticipant:(NSString *)participantJID toGroup:(NSString *)groupJID;
 - (void)removeParticipant:(NSString *)participantJID fromGroup:(NSString *)groupJID;
 
@@ -103,6 +104,13 @@ typedef NS_ENUM(NSInteger, WAMessageStatus) {
 - (void)recordCallLog:(NSDictionary *)log;
 - (NSArray *)callLogs;
 - (void)clearCallLogs;
+
+// LID <-> Phone Number & Contact Name Resolution
+- (void)registerLidMapping:(NSString *)lidJid pnJid:(NSString *)pnJid;
+- (void)registerContactName:(NSString *)name pushName:(NSString *)pushName lidJid:(NSString *)lidJid pnJid:(NSString *)pnJid;
+- (NSString *)displayNameForJID:(NSString *)jid;
+- (NSString *)phoneNumberJIDForJID:(NSString *)jid;
+- (NSString *)lidJIDForJID:(NSString *)jid;
 
 // Re-resolves contact names against AddressBook and push names, persists if changed.
 - (void)refreshContactNames;

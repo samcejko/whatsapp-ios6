@@ -1,4 +1,5 @@
 #import "WACommon.h"
+#import "WAChatStore.h"
 #import <UIKit/UIKit.h>
 #import <CoreText/CoreText.h>
 #import <AddressBook/AddressBook.h>
@@ -261,22 +262,38 @@ NSString *WADisplayNameForChat(NSString *jid, NSString *savedName)
         return savedName;
     }
 
-    // 2. Verified Meta service accounts
+    // 2. Consult WAChatStore for resolved contact / group / pushName / LID->PN mapping
+    if (jid.length) {
+        NSString *storeName = [[WAChatStore shared] displayNameForJID:jid];
+        if (storeName.length && !WAIsRawNumberOrEmpty(storeName)) {
+            return storeName;
+        }
+    }
+
+    // 3. Verified Meta service accounts
     NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    user = [user componentsSeparatedByString:@":"].firstObject ?: user;
     if ([user isEqualToString:@"447974905007"]) return @"Facebook";
     if ([user isEqualToString:@"447723442982"]) return @"Instagram";
     if ([user isEqualToString:@"0"]) return @"WhatsApp";
 
-    // 3. If it's a group (@g.us), return savedName if present, else default
+    // 4. If it's a group (@g.us), return savedName if present, else default
     if ([jid rangeOfString:@"@g.us"].location != NSNotFound) {
         return (savedName.length && !WAIsRawNumberOrEmpty(savedName)) ? savedName : WALoc(@"group_default");
     }
 
-    // 4. Check AddressBook by phone number digits
+    // 5. Check AddressBook by phone number digits (or resolved PN for @lid)
     NSString *ab = WAAddressBookNameForNumber(user);
     if (ab.length) return ab;
 
-    // 5. Format as phone number (or WhatsApp kontakt for LID)
+    NSString *pnJid = jid.length ? [[WAChatStore shared] phoneNumberJIDForJID:jid] : nil;
+    if (pnJid.length) {
+        NSString *abPn = WAAddressBookNameForNumber(pnJid);
+        if (abPn.length) return abPn;
+        return WAFormatPhoneNumber(pnJid);
+    }
+
+    // 6. Format as phone number (or WhatsApp kontakt for unmapped LID)
     return WAFormatPhoneNumber(jid);
 }
 

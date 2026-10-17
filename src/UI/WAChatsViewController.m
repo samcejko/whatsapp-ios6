@@ -248,7 +248,15 @@
     [self updateEmptyState];
 }
 
-- (void)onState:(NSNotification *)n { [self refreshBanner:[n.userInfo[@"state"] integerValue]]; }
+- (void)onState:(NSNotification *)n
+{
+    WASessionState s = [n.userInfo[@"state"] integerValue];
+    [self refreshBanner:s];
+    if (s == WASessionStateConnected) {
+        [self.requestedAvatars removeAllObjects];
+        [self.table reloadData];
+    }
+}
 
 #pragma mark - search
 

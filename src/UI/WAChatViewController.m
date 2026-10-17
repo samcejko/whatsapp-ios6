@@ -38,6 +38,7 @@
 @property (nonatomic, strong) UIPopoverController *popover;
 @property (nonatomic) CGFloat kbHeight;
 @property (nonatomic, strong) UIDocumentInteractionController *docController;
+@property (nonatomic, strong) UIImageView *navAvatarView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *subtitleLabel;
 @property (nonatomic, strong) NSDictionary *selectedMsg;
@@ -47,6 +48,7 @@
 @property (nonatomic) BOOL isRecordingVoice;
 @property (nonatomic, strong) AVAudioRecorder *recorder;
 @property (nonatomic, strong) NSString *recordFilePath;
+@property (nonatomic, copy) NSString *recordMsgId;
 @property (nonatomic) NSTimeInterval recordStartTime;
 @property (nonatomic, strong) NSTimer *recordTimer;
 @end
@@ -87,31 +89,37 @@
 
     self.navigationItem.rightBarButtonItems = @[ videoItem, callItem, searchItem ];
 
-    // Title View: Contact Name + Ephemeral indicator + Presence / Recording status
-    UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 180, 44)];
+    // Title View: Avatar + Contact Name + Ephemeral indicator + Presence / Recording status
+    UIView *tv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 210, 44)];
     tv.userInteractionEnabled = YES;
     [tv addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openContactInfo)]];
 
+    self.navAvatarView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 7, 30, 30)];
+    self.navAvatarView.image = [WATheme avatarForName:self.title jid:self.jid diameter:30];
+    self.navAvatarView.layer.cornerRadius = 15;
+    self.navAvatarView.clipsToBounds = YES;
+    [tv addSubview:self.navAvatarView];
+
     BOOL isEphemeral = [[WAChatStore shared] ephemeralDurationForChat:self.jid] > 0;
     if (isEphemeral) {
-        UIImageView *clock = [[UIImageView alloc] initWithFrame:CGRectMake(12, 8, 12, 12)];
+        UIImageView *clock = [[UIImageView alloc] initWithFrame:CGRectMake(36, 8, 12, 12)];
         clock.image = [WATheme clockIconWithColor:[UIColor colorWithWhite:0.95 alpha:1.0] size:CGSizeMake(12, 12)];
         [tv addSubview:clock];
-        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(28, 4, 140, 20)];
+        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(52, 4, 154, 20)];
     } else {
-        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 180, 20)];
+        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(36, 4, 170, 20)];
     }
     self.titleLabel.text = self.title;
     self.titleLabel.font = [UIFont boldSystemFontOfSize:17];
     self.titleLabel.textColor = [UIColor whiteColor];
-    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.textAlignment = NSTextAlignmentLeft;
     self.titleLabel.backgroundColor = [UIColor clearColor];
     [tv addSubview:self.titleLabel];
 
-    self.subtitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 24, 180, 16)];
+    self.subtitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(36, 24, 170, 16)];
     self.subtitleLabel.font = [UIFont systemFontOfSize:11];
     self.subtitleLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1.0];
-    self.subtitleLabel.textAlignment = NSTextAlignmentCenter;
+    self.subtitleLabel.textAlignment = NSTextAlignmentLeft;
     self.subtitleLabel.backgroundColor = [UIColor clearColor];
     [tv addSubview:self.subtitleLabel];
     self.navigationItem.titleView = tv;
@@ -336,8 +344,8 @@
     self.recordStartTime = [NSDate timeIntervalSinceReferenceDate];
     self.recordTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(recordTick) userInfo:nil repeats:YES];
 
-    NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
-    NSString *basePath = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_aud_%@", mid]];
+    self.recordMsgId = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
+    NSString *basePath = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_aud_%@", self.recordMsgId]];
     self.recordFilePath = [basePath stringByAppendingPathExtension:@"wav"];
 
     NSDictionary *settings = @{
@@ -373,14 +381,19 @@
     self.field.placeholder = WALoc(@"message_hint");
 
     NSTimeInterval dur = [NSDate timeIntervalSinceReferenceDate] - self.recordStartTime;
-    if (dur >= 1.0) {
-        // Record outgoing voice note in store
-        NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
-        [[WAChatStore shared] recordOutgoingAudioDuration:(uint32_t)ceil(dur) toJID:self.jid msgId:mid status:WAMessageStatusSent];
+    if (dur >= 1.0 && self.recordMsgId.length) {
+        NSString *mid = self.recordMsgId;
+        uint32_t secs = (uint32_t)ceil(dur);
+        [[WAChatStore shared] recordOutgoingAudioDuration:secs toJID:self.jid msgId:mid status:WAMessageStatusPending];
+        NSData *audioData = [NSData dataWithContentsOfFile:self.recordFilePath];
+        if (audioData.length) {
+            [[WASession shared] sendAudio:audioData duration:secs toJID:self.jid msgId:mid];
+        }
         AudioServicesPlaySystemSound(1004);
     } else {
         [[NSFileManager defaultManager] removeItemAtPath:self.recordFilePath error:nil];
     }
+    self.recordMsgId = nil;
 }
 
 - (void)micTouchUpOutside
@@ -459,7 +472,7 @@
         WAAudioPlayer *player = [WAAudioPlayer shared];
         BOOL isThis = [player.currentMsgId isEqualToString:mid];
         NSString *stateIcon = (isThis && player.isPlaying) ? @"⏸ " : @"▶ ";
-        uint32_t dur = [m[@"duration"] unsignedIntValue];
+        uint32_t dur = [m[@"dur"] ?: m[@"duration"] unsignedIntValue];
         if (dur == 0) dur = 1;
         if (isThis && (player.isPlaying || player.isPaused)) {
             int cur = (int)player.currentTime;
@@ -484,8 +497,15 @@
 - (void)onStoreChanged:(NSNotification *)n
 {
     NSString *changed = n.userInfo[@"jid"];
-    if (changed.length && ![changed isEqualToString:[WAChatStore keyForJID:self.jid]]) return;
+    NSString *myKey = [WAChatStore keyForJID:self.jid];
+    NSString *pnJid = [[WAChatStore shared] phoneNumberJIDForJID:self.jid];
+    NSString *lidJid = [[WAChatStore shared] lidJIDForJID:self.jid];
+    NSString *pnKey = pnJid.length ? [WAChatStore keyForJID:pnJid] : nil;
+    NSString *lidKey = lidJid.length ? [WAChatStore keyForJID:lidJid] : nil;
+    if (changed.length && ![changed isEqualToString:myKey] && ![changed isEqualToString:pnKey] && ![changed isEqualToString:lidKey]) return;
     self.title = WADisplayNameForChat(self.jid, nil);
+    self.titleLabel.text = self.title;
+    self.navAvatarView.image = [WATheme avatarForName:self.title jid:self.jid diameter:30];
     [self loadMessages];
     [self.table reloadData];
     [self scrollToBottom];
@@ -661,10 +681,13 @@
     NSString *mid = [NSString stringWithFormat:@"3EB0%08X%08X", (unsigned int)arc4random(), (unsigned int)arc4random()];
     NSDictionary *quoted = nil;
     if (self.replyingToMsg) {
-        NSString *author = [self.replyingToMsg[@"out"] boolValue] ? WALoc(@"you") : (self.replyingToMsg[@"sender"] ?: self.title);
+        BOOL qOut = [self.replyingToMsg[@"out"] boolValue];
+        NSString *author = qOut ? WALoc(@"you") : (self.replyingToMsg[@"sender"] ?: self.title);
+        NSString *participant = qOut ? ([WASession shared].ownJID ?: @"") : (self.isGroup ? (self.replyingToMsg[@"sender"] ?: self.jid) : self.jid);
         quoted = @{ @"id": self.replyingToMsg[@"id"] ?: @"",
                     @"text": self.replyingToMsg[@"display"] ?: @"",
-                    @"sender": author };
+                    @"sender": author,
+                    @"participant": participant };
         [self cancelReply];
     }
 
@@ -678,7 +701,7 @@
             [[WASession shared] sendText:text toJID:recip msgId:rmid];
         }
     } else {
-        [[WASession shared] sendText:text toJID:self.jid msgId:mid];
+        [[WASession shared] sendText:text toJID:self.jid msgId:mid quoted:quoted];
     }
     AudioServicesPlaySystemSound(1004);
     WALog(@"send to %@ [%@]: %lu chars (broadcast=%d)", self.jid, mid, (unsigned long)text.length, isBroadcast);
@@ -1055,10 +1078,12 @@
     } else if (actionSheet.tag == 201) { // Reaction emojis
         if (!self.selectedMsg) return;
         NSString *mid = self.selectedMsg[@"id"];
+        BOOL isOut = [self.selectedMsg[@"out"] boolValue];
         NSArray *emojis = @[ @"👍", @"❤️", @"😂", @"😮", @"😢", @"🙏", @"" ];
         if (buttonIndex < emojis.count) {
             NSString *chosen = emojis[buttonIndex];
             [[WAChatStore shared] addReaction:chosen toMessageId:mid inChat:self.jid];
+            [[WASession shared] sendReaction:chosen toMessageId:mid fromMe:isOut inChat:self.jid];
         }
         self.selectedMsg = nil;
     } else if (actionSheet.tag == 202) { // Forward target selection
@@ -1071,8 +1096,7 @@
 
             if (thumb.length) {
                 [[WAChatStore shared] recordOutgoingMedia:thumb caption:(text ?: @"") toJID:targetJID msgId:mid status:WAMessageStatusPending];
-                // Reuse image payload or send text caption
-                [[WASession shared] sendText:(text ?: @"📷") toJID:targetJID msgId:mid];
+                [[WASession shared] sendImage:thumb thumb:thumb caption:(text ?: @"") toJID:targetJID msgId:mid];
             } else if (text.length) {
                 [[WAChatStore shared] recordOutgoing:text toJID:targetJID msgId:mid status:WAMessageStatusPending];
                 [[WASession shared] sendText:text toJID:targetJID msgId:mid];

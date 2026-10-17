@@ -29,16 +29,21 @@
 #define F_HS_SYNCTYPE               1
 #define F_HS_CONVERSATIONS          2
 #define F_HS_PUSHNAMES              7
+#define F_HS_PN_LID_MAPPINGS       15
 #define F_PUSHNAME_ID               1
 #define F_PUSHNAME_NAME             2
+#define F_MAPPING_PNJID             1
+#define F_MAPPING_LIDJID            2
 #define F_CONV_ID                   1
 #define F_CONV_MESSAGES             2
 #define F_CONV_LASTMSGTS            5
 #define F_CONV_UNREAD               6
 #define F_CONV_TIMESTAMP           12
 #define F_CONV_NAME                13
-#define F_CONV_PNJID               29
+#define F_CONV_NEWJID              29
 #define F_CONV_DISPLAYNAME         38
+#define F_CONV_LIDJID              40
+#define F_CONV_PNJID               42
 #define F_HSM_MESSAGE               1
 #define F_WMI_KEY                    1
 #define F_WMI_MESSAGE               2
@@ -92,6 +97,7 @@ static void conv_free(wa_history_conv *c)
     free(c->name);
     free(c->last);
     free(c->pn_jid);
+    free(c->lid_jid);
     for (int i = 0; i < c->nmsgs; i++) {
         free(c->msgs[i].text);
         free(c->msgs[i].id);
@@ -101,6 +107,8 @@ static void conv_free(wa_history_conv *c)
         free(c->msgs[i].direct_path);
         free(c->msgs[i].media_key);
         free(c->msgs[i].enc_sha);
+        free(c->msgs[i].quoted_id);
+        free(c->msgs[i].quoted_text);
     }
     free(c->msgs);
 }
@@ -132,10 +140,41 @@ static void copy_thumb(const uint8_t *sub, size_t subl, uint32_t field, wa_histo
     }
 }
 
+static void unwrap_inner_msg(const uint8_t **msg, size_t *len)
+{
+    for (int depth = 0; depth < 4; depth++) {
+        const uint8_t *wrap = NULL, *inner = NULL;
+        size_t wl = 0, il = 0;
+        if (pb_get_bytes(*msg, *len, 31, &wrap, &wl) && pb_get_bytes(wrap, wl, 2, &inner, &il)) {
+            *msg = inner; *len = il; continue; // deviceSentMessage (31) -> message (2)
+        }
+        static const uint32_t fmsg_fields[] = { 40, 37, 55, 53, 58, 74 };
+        int unwrapped = 0;
+        for (size_t i = 0; i < sizeof(fmsg_fields)/sizeof(fmsg_fields[0]); i++) {
+            if (pb_get_bytes(*msg, *len, fmsg_fields[i], &wrap, &wl) && pb_get_bytes(wrap, wl, 1, &inner, &il)) {
+                *msg = inner; *len = il; unwrapped = 1; break;
+            }
+        }
+        if (unwrapped) continue;
+        if (pb_get_bytes(*msg, *len, 12, &wrap, &wl) && pb_get_bytes(wrap, wl, 14, &inner, &il)) {
+            *msg = inner; *len = il; continue; // protocolMessage (12) -> editedMessage (14)
+        }
+        break;
+    }
+}
+
 // Fill m->{kind,text,thumb,duration,filename} from a decoded Message. Returns 1 for a displayable message, 0 to skip
 // (protocol/system messages, reactions, key distribution, …). Text and the recognised media types are displayable.
 static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_msg *m)
 {
+    unwrap_inner_msg(&inner, &innerl);
+
+    char qid[96] = {0}, qtxt[256] = {0};
+    if (wa_msg_parse_quoted(inner, innerl, qid, sizeof qid, qtxt, sizeof qtxt) && qid[0]) {
+        m->quoted_id = wa_strdup(qid);
+        if (qtxt[0]) m->quoted_text = wa_strdup(qtxt);
+    }
+
     char *text = wa_msg_parse_text(inner, innerl);
     if (text) { m->kind = WA_MSG_TEXT; m->text = text; return 1; }
 
@@ -179,6 +218,8 @@ static int extract_msg_content(const uint8_t *inner, size_t innerl, wa_history_m
         m->text = pb_get_string(sub, subl, F_CONTACT_DISPLAYNAME);
         return 1;
     }
+    free(m->quoted_id); m->quoted_id = NULL;
+    free(m->quoted_text); m->quoted_text = NULL;
     return 0;
 }
 
@@ -198,6 +239,8 @@ void wa_history_msg_free(wa_history_msg *m)
     free(m->direct_path);
     free(m->media_key);
     free(m->enc_sha);
+    free(m->quoted_id);
+    free(m->quoted_text);
     memset(m, 0, sizeof *m);
 }
 
@@ -223,6 +266,13 @@ void wa_history_result_free(wa_history_result *r)
     free(r->pushnames);
     r->pushnames = NULL;
     r->npushnames = 0;
+    for (int i = 0; i < r->nmappings; i++) {
+        free(r->mappings[i].pn_jid);
+        free(r->mappings[i].lid_jid);
+    }
+    free(r->mappings);
+    r->mappings = NULL;
+    r->nmappings = 0;
 }
 
 // Parse one Conversation message into out. Returns 0 (out filled, caller owns the strings) or -1 (skip this one).
@@ -235,6 +285,8 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
     out->name = pb_get_string(c, cl, F_CONV_NAME);
     if (!out->name) out->name = pb_get_string(c, cl, F_CONV_DISPLAYNAME);
     out->pn_jid = pb_get_string(c, cl, F_CONV_PNJID);
+    if (!out->pn_jid) out->pn_jid = pb_get_string(c, cl, F_CONV_NEWJID);
+    out->lid_jid = pb_get_string(c, cl, F_CONV_LIDJID);
 
     uint64_t ts = 0;
     if (pb_get_varint(c, cl, F_CONV_TIMESTAMP, &ts)) out->timestamp = ts;
@@ -287,8 +339,7 @@ static int parse_conversation(const uint8_t *c, size_t cl, wa_history_conv *out)
         if (n >= mcap) {
             int ncap = mcap ? mcap * 2 : 16;
             wa_history_msg *p = (wa_history_msg *)realloc(msgs, (size_t)ncap * sizeof *p);
-            if (!p) { free(msg.text); free(msg.id); free(msg.thumb); free(msg.filename);
-                      free(msg.sender); free(msg.direct_path); free(msg.media_key); free(msg.enc_sha); break; }
+            if (!p) { wa_history_msg_free(&msg); break; }
             msgs = p;
             mcap = ncap;
         }
@@ -314,7 +365,7 @@ int wa_history_parse(const uint8_t *data, size_t len, wa_history_result *out)
     pb_reader r;
     pb_reader_init(&r, data, len);
     pb_field f;
-    int cap = 0, pncap = 0, rc;
+    int cap = 0, pncap = 0, mapcap = 0, rc;
     while ((rc = pb_next(&r, &f)) > 0) {
         if (f.field == F_HS_CONVERSATIONS && f.wire == PB_BYTES) {
             wa_history_conv conv;
@@ -344,6 +395,21 @@ int wa_history_parse(const uint8_t *data, size_t len, wa_history_result *out)
                 out->pushnames[out->npushnames].pushname = pname;
                 out->npushnames++;
             } else { free(pid); free(pname); }
+        } else if (f.field == F_HS_PN_LID_MAPPINGS && f.wire == PB_BYTES) {
+            char *pn = pb_get_string(f.data, f.len, F_MAPPING_PNJID);
+            char *lid = pb_get_string(f.data, f.len, F_MAPPING_LIDJID);
+            if (pn && lid && pn[0] && lid[0]) {
+                if (out->nmappings >= mapcap) {
+                    int nmcap = mapcap ? mapcap * 2 : 32;
+                    wa_history_lid_mapping *nm = (wa_history_lid_mapping *)realloc(out->mappings, (size_t)nmcap * sizeof *nm);
+                    if (!nm) { free(pn); free(lid); break; }
+                    out->mappings = nm;
+                    mapcap = nmcap;
+                }
+                out->mappings[out->nmappings].pn_jid = pn;
+                out->mappings[out->nmappings].lid_jid = lid;
+                out->nmappings++;
+            } else { free(pn); free(lid); }
         }
     }
     if (rc < 0) wa_log("history: malformed HistorySync (parsed %d conversations before the error)", out->nconvs);
@@ -462,7 +528,7 @@ int wa_history_from_message(const uint8_t *message, size_t mlen, const char *ca_
     if (pb_get_bytes(hsn, hsnl, F_HSN_INLINEPAYLOAD, &inlinep, &inlinel) && inlinel > 0) {
         if (wa_history_parse_compressed(inlinep, inlinel, out) != 0) { wa_log("history: inline parse failed"); return -1; }
         if (out->sync_type == 0 && have_sync_type) out->sync_type = (int)sync_type;
-        wa_log("history: inline bootstrap, syncType=%d -> %d conversations", out->sync_type, out->nconvs);
+        wa_log("history: inline bootstrap, syncType=%d -> %d conversations, %d mappings", out->sync_type, out->nconvs, out->nmappings);
         return 1;
     }
 
@@ -488,8 +554,187 @@ int wa_history_from_message(const uint8_t *message, size_t mlen, const char *ca_
     wa_buf_free(&compressed);
     if (rc != 0) return -1;
     if (out->sync_type == 0 && have_sync_type) out->sync_type = (int)sync_type;
-    wa_log("history: external blob, syncType=%d -> %d conversations", out->sync_type, out->nconvs);
+    wa_log("history: external blob, syncType=%d -> %d conversations, %d mappings", out->sync_type, out->nconvs, out->nmappings);
     return 1;
+}
+
+// -------------------------------------------------------------------------------------------------- AppStateSync (syncd)
+
+int wa_syncd_parse_key_share(const uint8_t *message, size_t mlen, wa_sync_key *out_keys, int max_keys)
+{
+    if (!out_keys || max_keys <= 0) return 0;
+    const uint8_t *pm = NULL, *ks = NULL;
+    size_t pml = 0, ksl = 0;
+    if (!pb_get_bytes(message, mlen, F_MSG_PROTOCOLMESSAGE, &pm, &pml)) return 0;
+    if (!pb_get_bytes(pm, pml, 7, &ks, &ksl)) return 0; // ProtocolMessage.appStateSyncKeyShare = 7
+    pb_reader r;
+    pb_reader_init(&r, ks, ksl);
+    pb_field f;
+    int count = 0;
+    while (pb_next(&r, &f) > 0 && count < max_keys) {
+        if (f.field != 1 || f.wire != PB_BYTES) continue; // AppStateSyncKeyShare.keys = 1
+        const uint8_t *kid_msg = NULL, *kdata_msg = NULL, *kid = NULL, *kdata = NULL;
+        size_t kid_msgl = 0, kdata_msgl = 0, kidl = 0, kdatal = 0;
+        if (!pb_get_bytes(f.data, f.len, 1, &kid_msg, &kid_msgl) ||
+            !pb_get_bytes(f.data, f.len, 2, &kdata_msg, &kdata_msgl)) continue;
+        if (!pb_get_bytes(kid_msg, kid_msgl, 1, &kid, &kidl) || kidl == 0 || kidl > sizeof(out_keys[0].key_id)) continue;
+        if (!pb_get_bytes(kdata_msg, kdata_msgl, 1, &kdata, &kdatal) || kdatal != 32) continue;
+        memset(&out_keys[count], 0, sizeof(out_keys[count]));
+        memcpy(out_keys[count].key_id, kid, kidl);
+        out_keys[count].key_id_len = kidl;
+        memcpy(out_keys[count].key_data, kdata, 32);
+        count++;
+    }
+    return count;
+}
+
+static void parse_sync_record(const uint8_t *rec, size_t recl, const wa_sync_key *keys, int nkeys,
+                              wa_sync_contact **arr, int *cnt, int *cap)
+{
+    const uint8_t *val_msg = NULL, *kid_msg = NULL, *blob = NULL, *kid = NULL;
+    size_t val_msgl = 0, kid_msgl = 0, blobl = 0, kidl = 0;
+    if (!pb_get_bytes(rec, recl, 2, &val_msg, &val_msgl) ||
+        !pb_get_bytes(rec, recl, 3, &kid_msg, &kid_msgl)) return;
+    if (!pb_get_bytes(val_msg, val_msgl, 1, &blob, &blobl) || blobl <= 16 + 32) return;
+    if (!pb_get_bytes(kid_msg, kid_msgl, 1, &kid, &kidl) || kidl == 0) return;
+
+    const uint8_t *key_data = NULL;
+    for (int i = 0; i < nkeys; i++) {
+        if (keys[i].key_id_len == kidl && memcmp(keys[i].key_id, kid, kidl) == 0) {
+            key_data = keys[i].key_data;
+            break;
+        }
+    }
+    if (!key_data) return;
+
+    uint8_t expanded[160];
+    if (wa_hkdf_sha256(NULL, 0, key_data, 32, "WhatsApp Mutation Keys", 22, expanded, sizeof expanded) != 0) return;
+    const uint8_t *val_enc_key = expanded + 32;
+    const uint8_t *iv = blob;
+    const uint8_t *ct = blob + 16;
+    size_t ct_len = blobl - 16 - 32;
+
+    wa_buf plain;
+    wa_buf_init(&plain);
+    if (wa_aes_cbc_decrypt(val_enc_key, iv, ct, ct_len, &plain) == 0) {
+        // SyncActionData: index=1 (JSON string), value=2 (SyncActionValue)
+        char *idx_json = pb_get_string(plain.data, plain.len, 1);
+        const uint8_t *sav = NULL, *ca = NULL;
+        size_t savl = 0, cal = 0;
+        if (idx_json && pb_get_bytes(plain.data, plain.len, 2, &sav, &savl) &&
+            pb_get_bytes(sav, savl, 2, &ca, &cal)) { // SyncActionValue.contactAction = 2
+            // Extract JID from index JSON: ["contact","<jid>"]
+            char *jid = NULL;
+            char *q1 = strchr(idx_json, '"');
+            if (q1) {
+                char *q2 = strchr(q1 + 1, '"');
+                if (q2) {
+                    char *q3 = strchr(q2 + 1, '"');
+                    if (q3) {
+                        char *q4 = strchr(q3 + 1, '"');
+                        if (q4 && q4 > q3 + 1) {
+                            size_t jl = (size_t)(q4 - (q3 + 1));
+                            jid = (char *)malloc(jl + 1);
+                            if (jid) { memcpy(jid, q3 + 1, jl); jid[jl] = 0; }
+                        }
+                    }
+                }
+            }
+            if (jid) {
+                if (*cnt >= *cap) {
+                    int ncap = *cap ? (*cap * 2) : 64;
+                    wa_sync_contact *np = (wa_sync_contact *)realloc(*arr, (size_t)ncap * sizeof(*np));
+                    if (np) { *arr = np; *cap = ncap; }
+                }
+                if (*cnt < *cap) {
+                    wa_sync_contact *c = &(*arr)[(*cnt)++];
+                    memset(c, 0, sizeof *c);
+                    c->jid = jid;
+                    c->full_name = pb_get_string(ca, cal, 1);
+                    c->first_name = pb_get_string(ca, cal, 2);
+                    c->lid_jid = pb_get_string(ca, cal, 3);
+                    c->pn_jid = pb_get_string(ca, cal, 5);
+                } else {
+                    free(jid);
+                }
+            }
+        }
+        free(idx_json);
+    }
+    wa_buf_free(&plain);
+}
+
+int wa_syncd_decrypt_records(const uint8_t *proto, size_t proto_len, int is_patch,
+                             const wa_sync_key *keys, int nkeys,
+                             wa_sync_contact **out_contacts, int *out_count)
+{
+    if (!out_contacts || !out_count) return -1;
+    *out_contacts = NULL;
+    *out_count = 0;
+    if (!proto || !proto_len || !keys || nkeys <= 0) return 0;
+
+    int cap = 0;
+    pb_reader r;
+    pb_reader_init(&r, proto, proto_len);
+    pb_field f;
+    while (pb_next(&r, &f) > 0) {
+        if (f.field != 2 || f.wire != PB_BYTES) continue;
+        if (is_patch) {
+            // SyncdPatch.mutations (2) -> SyncdMutation.record (2)
+            const uint8_t *rec = NULL;
+            size_t recl = 0;
+            if (pb_get_bytes(f.data, f.len, 2, &rec, &recl))
+                parse_sync_record(rec, recl, keys, nkeys, out_contacts, out_count, &cap);
+        } else {
+            // SyncdSnapshot.records (2) -> SyncdRecord
+            parse_sync_record(f.data, f.len, keys, nkeys, out_contacts, out_count, &cap);
+        }
+    }
+    return 0;
+}
+
+int wa_syncd_download_and_decrypt_snapshot(const uint8_t *ext_blob_ref, size_t ref_len, const char *ca_file,
+                                           const wa_sync_key *keys, int nkeys,
+                                           wa_sync_contact **out_contacts, int *out_count)
+{
+    if (!out_contacts || !out_count) return -1;
+    *out_contacts = NULL;
+    *out_count = 0;
+    const uint8_t *mkey = NULL, *enc_sha = NULL;
+    size_t mkeyl = 0, enc_shal = 0;
+    char *direct = pb_get_string(ext_blob_ref, ref_len, 2); // ExternalBlobReference.directPath = 2
+    int have_key = pb_get_bytes(ext_blob_ref, ref_len, 1, &mkey, &mkeyl) && mkeyl == 32; // mediaKey = 1
+    pb_get_bytes(ext_blob_ref, ref_len, 6, &enc_sha, &enc_shal); // fileEncSha256 = 6
+    if (!direct || !direct[0] || !have_key) { free(direct); return -1; }
+
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    int rc = fetch_media_blob(direct, enc_sha, enc_shal, ca_file, &blob, &blob_len);
+    free(direct);
+    if (rc != 0) return -1;
+
+    wa_buf plain;
+    wa_buf_init(&plain);
+    rc = media_decrypt_info(blob, blob_len, mkey, "WhatsApp Patch Integrity", &plain);
+    free(blob);
+    if (rc != 0) { wa_buf_free(&plain); return -1; }
+
+    rc = wa_syncd_decrypt_records(plain.data, plain.len, 0, keys, nkeys, out_contacts, out_count);
+    wa_buf_free(&plain);
+    return rc;
+}
+
+void wa_syncd_contacts_free(wa_sync_contact *contacts, int count)
+{
+    if (!contacts) return;
+    for (int i = 0; i < count; i++) {
+        free(contacts[i].jid);
+        free(contacts[i].full_name);
+        free(contacts[i].first_name);
+        free(contacts[i].lid_jid);
+        free(contacts[i].pn_jid);
+    }
+    free(contacts);
 }
 
 // -------------------------------------------------------------------------------------------------- self test

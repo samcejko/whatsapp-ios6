@@ -38,7 +38,10 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 // Send a 1:1 text to a bare user JID ("<num>@s.whatsapp.net"). Runs on the client thread.
 - (void)sendText:(NSString *)text toJID:(NSString *)jid;
 - (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid;
+- (void)sendText:(NSString *)text toJID:(NSString *)jid msgId:(NSString *)mid quoted:(NSDictionary *)quoted;
+- (void)sendReaction:(NSString *)emoji toMessageId:(NSString *)mid fromMe:(BOOL)fromMe inChat:(NSString *)jid;
 - (void)sendImage:(NSData *)jpegData thumb:(NSData *)thumbData caption:(NSString *)caption toJID:(NSString *)jid msgId:(NSString *)mid;
+- (void)sendAudio:(NSData *)audioData duration:(uint32_t)dur toJID:(NSString *)jid msgId:(NSString *)mid;
 - (void)sendReadReceiptForMessage:(NSString *)mid toJID:(NSString *)jid participant:(NSString *)part;
 // Place a 1:1 call to a bare user JID. Sends the encrypted <offer>; the media comes up on the client thread.
 - (void)placeCallTo:(NSString *)jid video:(BOOL)video;
@@ -60,5 +63,7 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 // Request contact's profile picture preview
 - (void)fetchProfilePicture:(NSString *)jid;
 
+// Request group metadata (subject & participants) via w:g2
+- (void)fetchGroupMetadata:(NSString *)groupJID;
 
 @end

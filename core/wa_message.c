@@ -10,6 +10,51 @@ int wa_msg_text_plaintext(const char *text, wa_buf *out)
     return pb_put_string(out, 1, text);   // Message.conversation = 1
 }
 
+int wa_msg_ext_text_plaintext(const char *text, const char *quoted_id, const char *quoted_sender,
+                              const char *quoted_text, wa_buf *out)
+{
+    wa_buf ext;
+    wa_buf_init(&ext);
+    int rc = pb_put_string(&ext, 1, text ? text : "");
+    if (rc == 0 && quoted_id && quoted_id[0]) {
+        wa_buf ctx, qmsg;
+        wa_buf_init(&ctx);
+        wa_buf_init(&qmsg);
+        rc = pb_put_string(&ctx, 1, quoted_id);   // ContextInfo.stanzaId = 1
+        if (rc == 0 && quoted_sender && quoted_sender[0])
+            rc = pb_put_string(&ctx, 2, quoted_sender); // ContextInfo.participant = 2
+        if (rc == 0) {
+            rc = pb_put_string(&qmsg, 1, (quoted_text && quoted_text[0]) ? quoted_text : " ");
+            if (rc == 0) rc = pb_put_message(&ctx, 3, &qmsg); // ContextInfo.quotedMessage = 3
+        }
+        if (rc == 0) rc = pb_put_message(&ext, 17, &ctx); // ExtendedTextMessage.contextInfo = 17
+        wa_buf_free(&ctx);
+        wa_buf_free(&qmsg);
+    }
+    if (rc == 0) rc = pb_put_message(out, 6, &ext); // Message.extendedTextMessage = 6
+    wa_buf_free(&ext);
+    return rc;
+}
+
+int wa_msg_reaction_plaintext(const char *target_id, const char *remote_jid, int from_me,
+                              const char *emoji, int64_t ts_ms, wa_buf *out)
+{
+    wa_buf key, react;
+    wa_buf_init(&key);
+    wa_buf_init(&react);
+    int rc = 0;
+    if (remote_jid && remote_jid[0]) rc = pb_put_string(&key, 1, remote_jid);
+    if (rc == 0) rc = pb_put_varint(&key, 2, from_me ? 1 : 0);
+    if (rc == 0 && target_id) rc = pb_put_string(&key, 3, target_id);
+    if (rc == 0) rc = pb_put_message(&react, 1, &key); // ReactionMessage.key = 1
+    if (rc == 0) rc = pb_put_string(&react, 2, emoji ? emoji : ""); // ReactionMessage.text = 2
+    if (rc == 0 && ts_ms > 0) rc = pb_put_varint(&react, 4, (uint64_t)ts_ms); // senderTimestampMs = 4
+    if (rc == 0) rc = pb_put_message(out, 46, &react); // Message.reactionMessage = 46
+    wa_buf_free(&key);
+    wa_buf_free(&react);
+    return rc;
+}
+
 int wa_msg_dsm_plaintext(const char *destination_jid, const uint8_t *inner_msg, size_t inner_len, wa_buf *out)
 {
     wa_buf dsm;
@@ -54,23 +99,102 @@ int wa_msg_decrypt(wa_sig_session *s, const wa_sig_keypair *our_identity, const 
     return rc;
 }
 
+static void unwrap_message_containers(const uint8_t **msg, size_t *len)
+{
+    for (int depth = 0; depth < 4; depth++) {
+        const uint8_t *wrap = NULL, *inner = NULL;
+        size_t wl = 0, il = 0;
+        if (pb_get_bytes(*msg, *len, 31, &wrap, &wl) && pb_get_bytes(wrap, wl, 2, &inner, &il)) {
+            *msg = inner; *len = il; continue; // deviceSentMessage (31) -> message (2)
+        }
+        static const uint32_t fmsg_fields[] = { 40, 37, 55, 53, 58, 74 };
+        int unwrapped = 0;
+        for (size_t i = 0; i < sizeof(fmsg_fields)/sizeof(fmsg_fields[0]); i++) {
+            if (pb_get_bytes(*msg, *len, fmsg_fields[i], &wrap, &wl) && pb_get_bytes(wrap, wl, 1, &inner, &il)) {
+                *msg = inner; *len = il; unwrapped = 1; break;
+            }
+        }
+        if (unwrapped) continue;
+        // protocolMessage (12) -> editedMessage (14) -> message
+        if (pb_get_bytes(*msg, *len, 12, &wrap, &wl) && pb_get_bytes(wrap, wl, 14, &inner, &il)) {
+            *msg = inner; *len = il; continue;
+        }
+        break;
+    }
+}
+
+char *wa_msg_parse_dsm_dest(const uint8_t *message, size_t len)
+{
+    const uint8_t *dsm;
+    size_t dl;
+    if (pb_get_bytes(message, len, 31, &dsm, &dl)) {
+        return pb_get_string(dsm, dl, 1); // DeviceSentMessage.destinationJid = 1
+    }
+    return NULL;
+}
+
 char *wa_msg_parse_text(const uint8_t *message, size_t len)
 {
+    unwrap_message_containers(&message, &len);
     char *s = pb_get_string(message, len, 1);   // conversation
     if (s) return s;
     const uint8_t *ext;
     size_t el;
     if (pb_get_bytes(message, len, 6, &ext, &el))   // extendedTextMessage
         return pb_get_string(ext, el, 1);           // ExtendedTextMessage.text = 1
-    const uint8_t *dsm;
-    size_t dl;
-    if (pb_get_bytes(message, len, 31, &dsm, &dl)) { // deviceSentMessage
-        const uint8_t *inner;
-        size_t il;
-        if (pb_get_bytes(dsm, dl, 2, &inner, &il))   // DeviceSentMessage.message = 2
-            return wa_msg_parse_text(inner, il);
-    }
     return NULL;
+}
+
+int wa_msg_parse_quoted(const uint8_t *message, size_t len, char *quoted_id_out, size_t id_cap,
+                        char *quoted_text_out, size_t text_cap)
+{
+    if (quoted_id_out && id_cap) quoted_id_out[0] = 0;
+    if (quoted_text_out && text_cap) quoted_text_out[0] = 0;
+    unwrap_message_containers(&message, &len);
+    const uint8_t *sub = NULL, *ctx = NULL;
+    size_t sl = 0, cl = 0;
+    static const uint32_t sub_fields[] = { 6, 3, 9, 7, 8 }; // extText, image, video, doc, audio
+    for (size_t i = 0; i < sizeof(sub_fields)/sizeof(sub_fields[0]); i++) {
+        if (pb_get_bytes(message, len, sub_fields[i], &sub, &sl) && pb_get_bytes(sub, sl, 17, &ctx, &cl)) {
+            char *sid = pb_get_string(ctx, cl, 1); // ContextInfo.stanzaId = 1
+            if (!sid || !sid[0]) { free(sid); return 0; }
+            if (quoted_id_out && id_cap) snprintf(quoted_id_out, id_cap, "%s", sid);
+            free(sid);
+            const uint8_t *qm = NULL;
+            size_t qml = 0;
+            if (pb_get_bytes(ctx, cl, 3, &qm, &qml)) { // ContextInfo.quotedMessage = 3
+                char *qt = wa_msg_parse_text(qm, qml);
+                if (qt) {
+                    if (quoted_text_out && text_cap) snprintf(quoted_text_out, text_cap, "%s", qt);
+                    free(qt);
+                }
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int wa_msg_parse_reaction(const uint8_t *message, size_t len, char *target_id_out, size_t id_cap,
+                          char *emoji_out, size_t emoji_cap)
+{
+    if (target_id_out && id_cap) target_id_out[0] = 0;
+    if (emoji_out && emoji_cap) emoji_out[0] = 0;
+    unwrap_message_containers(&message, &len);
+    const uint8_t *react = NULL, *key = NULL;
+    size_t rl = 0, kl = 0;
+    if (!pb_get_bytes(message, len, 46, &react, &rl)) return 0;
+    if (!pb_get_bytes(react, rl, 1, &key, &kl)) return 0;
+    char *tid = pb_get_string(key, kl, 3); // MessageKey.id = 3
+    if (!tid || !tid[0]) { free(tid); return 0; }
+    if (target_id_out && id_cap) snprintf(target_id_out, id_cap, "%s", tid);
+    free(tid);
+    char *em = pb_get_string(react, rl, 2); // ReactionMessage.text = 2
+    if (em) {
+        if (emoji_out && emoji_cap) snprintf(emoji_out, emoji_cap, "%s", em);
+        free(em);
+    }
+    return 1;
 }
 
 wa_node *wa_msg_build_node(const char *to, const char *id, const uint8_t *enc, size_t enc_len, const char *enc_type)
@@ -114,7 +238,7 @@ wa_node *wa_msg_build_dm(const char *to_user, const char *id, const wa_msg_deven
 int wa_msg_parse_incoming(const wa_node *message, wa_msg_incoming *out)
 {
     if (!wa_node_tag_is(message, "message")) return 0;
-    wa_node *enc = wa_node_child(message, "enc");
+    const wa_node *enc = wa_node_find(message, "enc");
     if (!enc || !enc->has_content) return 0;
     memset(out, 0, sizeof *out);
     out->from = wa_node_get(message, "from");

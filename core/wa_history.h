@@ -23,6 +23,7 @@ enum {
     WA_MSG_STICKER,
     WA_MSG_LOCATION,
     WA_MSG_CONTACT,
+    WA_MSG_REACTION,
 };
 
 // Message status codes (matches WebMessageInfo.Status enum)
@@ -54,6 +55,8 @@ typedef struct {
     size_t media_key_len;
     uint8_t *enc_sha;    // fileEncSha256 (URL token), or NULL
     size_t enc_sha_len;
+    char *quoted_id;     // quoted message stanzaId, or NULL
+    char *quoted_text;   // quoted message text preview, or NULL
 } wa_history_msg;
 
 // HKDF "app info" strings for WhatsApp media decryption, by kind (for full-media download). NULL for non-media.
@@ -78,6 +81,7 @@ typedef struct {
     char *name;          // display name (Conversation.name / .displayName), or NULL
     char *last;          // text of the most recent message, or NULL
     char *pn_jid;        // phone number JID if present (e.g. for @lid conversations)
+    char *lid_jid;       // LID JID if present (e.g. for @s.whatsapp.net conversations)
     uint64_t timestamp;  // conversationTimestamp / lastMsgTimestamp / newest messageTimestamp (seconds) for sorting
     uint32_t unread;     // unreadCount, or 0
     wa_history_msg *msgs; // text messages, oldest-first (NULL when none)
@@ -90,10 +94,17 @@ typedef struct {
 } wa_history_pushname;
 
 typedef struct {
+    char *pn_jid;
+    char *lid_jid;
+} wa_history_lid_mapping;
+
+typedef struct {
     wa_history_conv *convs;
     int nconvs;
     wa_history_pushname *pushnames;
     int npushnames;
+    wa_history_lid_mapping *mappings;
+    int nmappings;
     int sync_type;       // HistorySync.syncType (0 = INITIAL_BOOTSTRAP, 3 = RECENT, 2 = FULL, ...)
 } wa_history_result;
 
@@ -116,6 +127,32 @@ int wa_history_media_decrypt(const uint8_t *blob, size_t blob_len, const uint8_t
 // obtained/parsed (the caller should still send the receipt so the phone stops re-sending the chunk).
 // ca_file: PEM bundle for the CDN TLS, or NULL to skip verification (the blob's own HMAC authenticates the content).
 int wa_history_from_message(const uint8_t *message, size_t mlen, const char *ca_file, wa_history_result *out);
+
+// AppStateSyncKeyShare (protocolMessage field 7) & w:sync:app:state contact action decryption
+typedef struct {
+    uint8_t key_id[16];
+    size_t key_id_len;
+    uint8_t key_data[32];
+} wa_sync_key;
+
+typedef struct {
+    char *jid;
+    char *full_name;
+    char *first_name;
+    char *lid_jid;
+    char *pn_jid;
+} wa_sync_contact;
+
+// Extract AppStateSyncKeyShare keys from a decrypted Message. Returns count of keys extracted (0 if none).
+int wa_syncd_parse_key_share(const uint8_t *message, size_t mlen, wa_sync_key *out_keys, int max_keys);
+// Decrypt a SyncdSnapshot or SyncdPatch protobuf (or download ExternalBlobReference first) and extract ContactActions.
+int wa_syncd_decrypt_records(const uint8_t *proto, size_t proto_len, int is_patch,
+                             const wa_sync_key *keys, int nkeys,
+                             wa_sync_contact **out_contacts, int *out_count);
+int wa_syncd_download_and_decrypt_snapshot(const uint8_t *ext_blob_ref, size_t ref_len, const char *ca_file,
+                                           const wa_sync_key *keys, int nkeys,
+                                           wa_sync_contact **out_contacts, int *out_count);
+void wa_syncd_contacts_free(wa_sync_contact *contacts, int count);
 
 int wa_history_selftest(void);
 

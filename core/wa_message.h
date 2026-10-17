@@ -16,6 +16,12 @@ extern "C" {
 
 // Build the Message protobuf for a plain text (field conversation=1). Appends to out.
 int wa_msg_text_plaintext(const char *text, wa_buf *out);
+// Build ExtendedTextMessage (field 6) with optional quoted reply contextInfo (field 17).
+int wa_msg_ext_text_plaintext(const char *text, const char *quoted_id, const char *quoted_sender,
+                              const char *quoted_text, wa_buf *out);
+// Build ReactionMessage (field 46) targeting a specific message key.
+int wa_msg_reaction_plaintext(const char *target_id, const char *remote_jid, int from_me,
+                              const char *emoji, int64_t ts_ms, wa_buf *out);
 // Build the DeviceSentMessage protobuf (field 31): wraps inner_msg with destinationJid. Appends to out.
 int wa_msg_dsm_plaintext(const char *destination_jid, const uint8_t *inner_msg, size_t inner_len, wa_buf *out);
 // Build the Message protobuf carrying a call key (Message.call.callKey) for a call <offer> <enc>.
@@ -28,8 +34,16 @@ int wa_msg_encrypt(wa_sig_session *s, const wa_sig_keypair *our_identity, const 
 int wa_msg_decrypt(wa_sig_session *s, const wa_sig_keypair *our_identity, const wa_sig_keypair *our_signed_prekey,
                    const wa_sig_keypair *our_one_time, int is_prekey, const uint8_t *enc, size_t len, wa_buf *out);
 
-// Extract the plain text (conversation / extendedTextMessage) from a decrypted Message. malloc'd, or NULL.
+// Extract the plain text (conversation / extendedTextMessage / containers) from a decrypted Message. malloc'd, or NULL.
 char *wa_msg_parse_text(const uint8_t *message, size_t len);
+// Extract destinationJid if message is wrapped in DeviceSentMessage (field 31). malloc'd, or NULL.
+char *wa_msg_parse_dsm_dest(const uint8_t *message, size_t len);
+// Extract quoted reply stanzaId and quoted text from contextInfo if present. Returns 1 if found.
+int wa_msg_parse_quoted(const uint8_t *message, size_t len, char *quoted_id_out, size_t id_cap,
+                        char *quoted_text_out, size_t text_cap);
+// Extract ReactionMessage (field 46) target message ID and emoji text. Returns 1 if message is a reaction.
+int wa_msg_parse_reaction(const uint8_t *message, size_t len, char *target_id_out, size_t id_cap,
+                          char *emoji_out, size_t emoji_cap);
 
 // Build a <message to=.. id=.. type=text><enc v=2 type=.. count=0>enc</enc></message> node (caller frees).
 wa_node *wa_msg_build_node(const char *to, const char *id, const uint8_t *enc, size_t enc_len, const char *enc_type);

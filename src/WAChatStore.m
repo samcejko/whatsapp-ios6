@@ -21,10 +21,14 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
     return s;
 }
 
+static BOOL g_storeInitializing = NO;
+
 - (instancetype)init
 {
     if ((self = [super init])) {
+        g_storeInitializing = YES;
         [self load];
+        g_storeInitializing = NO;
         NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
         [nc addObserver:self selector:@selector(onConversations:) name:WASessionConversations object:nil];
         [nc addObserver:self selector:@selector(onMessage:) name:WASessionMessage object:nil];
@@ -35,27 +39,251 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
 
 - (NSString *)path { return [WADocumentsPath() stringByAppendingPathComponent:@"wa6.chats.plist"]; }
 
-// Canonical key for a JID: the digits of the user part (ignores the :device suffix and server), so a conversation's
-// history id and the bare JID of a live message from the same number land in the same chat. Falls back to the whole
-// string when there are no digits (defensive).
-+ (NSString *)keyForJID:(NSString *)jid
++ (NSString *)rawDigitsForJID:(NSString *)jid
 {
     if (!jid.length) return @"";
     NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
+    user = [user componentsSeparatedByString:@":"].firstObject ?: user;
+    user = [user componentsSeparatedByString:@"_"].firstObject ?: user;
     NSString *digits = [[user componentsSeparatedByCharactersInSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]] componentsJoinedByString:@""];
     return digits.length ? digits : jid;
 }
 
+// Canonical key for a JID: strips :device and @server, then unifies @lid and @s.whatsapp.net keys if mapped.
++ (NSString *)keyForJID:(NSString *)jid
+{
+    if (!jid.length) return @"";
+    NSString *digits = [self rawDigitsForJID:jid];
+    if (!g_storeInitializing) {
+        WAChatStore *s = [WAChatStore shared];
+        if (s && s.chats) {
+            if (s.chats[digits]) return digits;
+            NSDictionary *lidToPn = s.chats[@"_lid_to_pn"];
+            NSDictionary *pnToLid = s.chats[@"_pn_to_lid"];
+            NSString *alt = [lidToPn isKindOfClass:[NSDictionary class]] ? lidToPn[digits] : nil;
+            if (!alt.length && [pnToLid isKindOfClass:[NSDictionary class]]) alt = pnToLid[digits];
+            if (alt.length && s.chats[alt]) return alt;
+        }
+    }
+    return digits;
+}
+
 - (NSString *)keyFor:(NSString *)jid
 {
-    return [WAChatStore keyForJID:jid];
+    if (!jid.length) return @"";
+    NSString *digits = [WAChatStore rawDigitsForJID:jid];
+    if (self.chats[digits]) return digits;
+    NSDictionary *lidToPn = self.chats[@"_lid_to_pn"];
+    NSDictionary *pnToLid = self.chats[@"_pn_to_lid"];
+    NSString *alt = [lidToPn isKindOfClass:[NSDictionary class]] ? lidToPn[digits] : nil;
+    if (!alt.length && [pnToLid isKindOfClass:[NSDictionary class]]) alt = pnToLid[digits];
+    if (alt.length && self.chats[alt]) return alt;
+    return digits;
+}
+
+- (void)mergeDuplicateChatFromKey:(NSString *)srcKey intoKey:(NSString *)dstKey
+{
+    if (!srcKey.length || !dstKey.length || [srcKey isEqualToString:dstKey]) return;
+    NSMutableDictionary *src = self.chats[srcKey];
+    NSMutableDictionary *dst = self.chats[dstKey];
+    if (![src isKindOfClass:[NSMutableDictionary class]] || ![dst isKindOfClass:[NSMutableDictionary class]]) return;
+
+    if ([src[@"msgs"] isKindOfClass:[NSArray class]] && [src[@"msgs"] count] > 0) {
+        [self mergeMessages:src[@"msgs"] into:dst];
+    }
+    if ([src[@"ts"] unsignedLongLongValue] > [dst[@"ts"] unsignedLongLongValue]) {
+        dst[@"ts"] = src[@"ts"];
+    }
+    if ([src[@"pinned"] boolValue]) dst[@"pinned"] = @YES;
+    if ([src[@"customName"] length] && ![dst[@"customName"] length]) dst[@"customName"] = src[@"customName"];
+    if ([src[@"pushName"] length] && ![dst[@"pushName"] length]) dst[@"pushName"] = src[@"pushName"];
+    if ([src[@"pnJid"] length] && ![dst[@"pnJid"] length]) dst[@"pnJid"] = src[@"pnJid"];
+    if ([src[@"lidJid"] length] && ![dst[@"lidJid"] length]) dst[@"lidJid"] = src[@"lidJid"];
+    if ([src[@"jid"] hasSuffix:@"@s.whatsapp.net"] && ![dst[@"pnJid"] length]) dst[@"pnJid"] = src[@"jid"];
+    if ([src[@"jid"] hasSuffix:@"@lid"] && ![dst[@"lidJid"] length]) dst[@"lidJid"] = src[@"jid"];
+    if (!WAIsRawNumberOrEmpty(src[@"name"]) && WAIsRawNumberOrEmpty(dst[@"name"])) {
+        dst[@"name"] = src[@"name"];
+    }
+    [self.chats removeObjectForKey:srcKey];
+}
+
+- (void)registerLidMapping:(NSString *)lidJid pnJid:(NSString *)pnJid
+{
+    if (!lidJid.length || !pnJid.length) return;
+    NSString *lidKey = [WAChatStore rawDigitsForJID:lidJid];
+    NSString *pnKey = [WAChatStore rawDigitsForJID:pnJid];
+    if (!lidKey.length || !pnKey.length || [lidKey isEqualToString:pnKey]) return;
+
+    NSMutableDictionary *lidToPn = self.chats[@"_lid_to_pn"];
+    if (![lidToPn isKindOfClass:[NSMutableDictionary class]]) {
+        lidToPn = [NSMutableDictionary dictionary];
+        self.chats[@"_lid_to_pn"] = lidToPn;
+    }
+    NSMutableDictionary *pnToLid = self.chats[@"_pn_to_lid"];
+    if (![pnToLid isKindOfClass:[NSMutableDictionary class]]) {
+        pnToLid = [NSMutableDictionary dictionary];
+        self.chats[@"_pn_to_lid"] = pnToLid;
+    }
+    lidToPn[lidKey] = pnKey;
+    pnToLid[pnKey] = lidKey;
+
+    NSString *cleanPn = [[pnJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject;
+    if (cleanPn.length) cleanPn = [cleanPn stringByAppendingString:@"@s.whatsapp.net"];
+    NSString *cleanLid = [[lidJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject;
+    if (cleanLid.length) cleanLid = [cleanLid stringByAppendingString:@"@lid"];
+
+    if (self.chats[lidKey] && self.chats[pnKey]) {
+        // Keep the entry that uses @lid (or has more messages) and merge the other into it
+        [self mergeDuplicateChatFromKey:pnKey intoKey:lidKey];
+    }
+    NSMutableDictionary *e = self.chats[lidKey] ?: self.chats[pnKey];
+    if ([e isKindOfClass:[NSMutableDictionary class]]) {
+        if (cleanPn.length) e[@"pnJid"] = cleanPn;
+        if (cleanLid.length) e[@"lidJid"] = cleanLid;
+    }
+}
+
+- (void)registerContactName:(NSString *)name pushName:(NSString *)pushName lidJid:(NSString *)lidJid pnJid:(NSString *)pnJid
+{
+    if (lidJid.length && pnJid.length) {
+        [self registerLidMapping:lidJid pnJid:pnJid];
+    }
+    NSMutableDictionary *contacts = self.chats[@"_contacts"];
+    if (![contacts isKindOfClass:[NSMutableDictionary class]]) {
+        contacts = [NSMutableDictionary dictionary];
+        self.chats[@"_contacts"] = contacts;
+    }
+    NSString *lidKey = [WAChatStore rawDigitsForJID:lidJid];
+    NSString *pnKey = [WAChatStore rawDigitsForJID:pnJid];
+    NSArray *keys = @[ lidKey ?: @"", pnKey ?: @"" ];
+    for (NSString *k in keys) {
+        if (!k.length) continue;
+        NSMutableDictionary *c = [contacts[k] isKindOfClass:[NSMutableDictionary class]]
+            ? contacts[k]
+            : ([contacts[k] isKindOfClass:[NSDictionary class]] ? [contacts[k] mutableCopy] : [NSMutableDictionary dictionary]);
+        if (name.length && !WAIsRawNumberOrEmpty(name)) c[@"name"] = name;
+        if (pushName.length && !WAIsRawNumberOrEmpty(pushName)) c[@"pushName"] = pushName;
+        if (lidJid.length) c[@"lidJid"] = lidJid;
+        if (pnJid.length) c[@"pnJid"] = pnJid;
+        contacts[k] = c;
+
+        NSMutableDictionary *chat = self.chats[k];
+        if ([chat isKindOfClass:[NSMutableDictionary class]] && ![chat[@"jid"] hasSuffix:@"@g.us"]) {
+            if (name.length && !WAIsRawNumberOrEmpty(name)) {
+                chat[@"name"] = name;
+            } else if (pushName.length && !WAIsRawNumberOrEmpty(pushName)) {
+                chat[@"pushName"] = pushName;
+                if (WAIsRawNumberOrEmpty(chat[@"name"])) chat[@"name"] = pushName;
+            }
+            if (pnJid.length && ![chat[@"pnJid"] length]) chat[@"pnJid"] = pnJid;
+            if (lidJid.length && ![chat[@"lidJid"] length]) chat[@"lidJid"] = lidJid;
+        }
+    }
+}
+
+- (NSString *)phoneNumberJIDForJID:(NSString *)jid
+{
+    if (!jid.length) return nil;
+    if ([jid hasSuffix:@"@s.whatsapp.net"]) {
+        NSString *u = [[jid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject;
+        return u.length ? [u stringByAppendingString:@"@s.whatsapp.net"] : jid;
+    }
+    NSString *digits = [WAChatStore rawDigitsForJID:jid];
+    NSDictionary *e = self.chats[[self keyFor:jid]];
+    if ([e isKindOfClass:[NSDictionary class]] && [e[@"pnJid"] length]) return e[@"pnJid"];
+    NSDictionary *contacts = self.chats[@"_contacts"];
+    if ([contacts isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *c = contacts[digits];
+        if ([c isKindOfClass:[NSDictionary class]] && [c[@"pnJid"] length]) return c[@"pnJid"];
+    }
+    NSDictionary *lidToPn = self.chats[@"_lid_to_pn"];
+    if ([lidToPn isKindOfClass:[NSDictionary class]]) {
+        NSString *pnDigits = lidToPn[digits];
+        if (pnDigits.length) return [pnDigits stringByAppendingString:@"@s.whatsapp.net"];
+    }
+    return nil;
+}
+
+- (NSString *)lidJIDForJID:(NSString *)jid
+{
+    if (!jid.length) return nil;
+    if ([jid hasSuffix:@"@lid"]) {
+        NSString *u = [[jid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject;
+        return u.length ? [u stringByAppendingString:@"@lid"] : jid;
+    }
+    NSString *digits = [WAChatStore rawDigitsForJID:jid];
+    NSDictionary *e = self.chats[[self keyFor:jid]];
+    if ([e isKindOfClass:[NSDictionary class]] && [e[@"lidJid"] length]) return e[@"lidJid"];
+    NSDictionary *pnToLid = self.chats[@"_pn_to_lid"];
+    if ([pnToLid isKindOfClass:[NSDictionary class]]) {
+        NSString *lidDigits = pnToLid[digits];
+        if (lidDigits.length) return [lidDigits stringByAppendingString:@"@lid"];
+    }
+    return nil;
+}
+
+- (NSString *)displayNameForJID:(NSString *)jid
+{
+    if (!jid.length) return nil;
+    NSString *digits = [WAChatStore rawDigitsForJID:jid];
+    NSString *key = [self keyFor:jid];
+    NSDictionary *e = self.chats[key];
+    if ([e isKindOfClass:[NSDictionary class]]) {
+        if ([e[@"customName"] length] && !WAIsRawNumberOrEmpty(e[@"customName"])) return e[@"customName"];
+        if ([e[@"name"] length] && !WAIsRawNumberOrEmpty(e[@"name"])) return e[@"name"];
+    }
+    NSDictionary *contacts = self.chats[@"_contacts"];
+    if ([contacts isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *c = contacts[digits] ?: contacts[key];
+        if (!c) {
+            NSDictionary *lidToPn = self.chats[@"_lid_to_pn"];
+            NSDictionary *pnToLid = self.chats[@"_pn_to_lid"];
+            NSString *alt = [lidToPn isKindOfClass:[NSDictionary class]] ? lidToPn[digits] : nil;
+            if (!alt.length && [pnToLid isKindOfClass:[NSDictionary class]]) alt = pnToLid[digits];
+            if (alt.length) c = contacts[alt];
+        }
+        if ([c isKindOfClass:[NSDictionary class]]) {
+            if ([c[@"name"] length] && !WAIsRawNumberOrEmpty(c[@"name"])) return c[@"name"];
+            if ([c[@"pushName"] length] && !WAIsRawNumberOrEmpty(c[@"pushName"])) return c[@"pushName"];
+        }
+    }
+    if ([e isKindOfClass:[NSDictionary class]] && [e[@"pushName"] length] && !WAIsRawNumberOrEmpty(e[@"pushName"])) {
+        return e[@"pushName"];
+    }
+    return nil;
 }
 
 - (void)load
 {
     self.chats = [NSMutableDictionary dictionary];
+    self.chats[@"_contacts"] = [NSMutableDictionary dictionary];
+    self.chats[@"_lid_to_pn"] = [NSMutableDictionary dictionary];
+    self.chats[@"_pn_to_lid"] = [NSMutableDictionary dictionary];
+
     NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self path]];
+    if ([disk[@"_contacts"] isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *mc = [NSMutableDictionary dictionary];
+        for (NSString *ck in disk[@"_contacts"]) {
+            if ([disk[@"_contacts"][ck] isKindOfClass:[NSDictionary class]])
+                mc[ck] = [disk[@"_contacts"][ck] mutableCopy];
+        }
+        self.chats[@"_contacts"] = mc;
+    }
+    if ([disk[@"_lid_to_pn"] isKindOfClass:[NSDictionary class]]) {
+        self.chats[@"_lid_to_pn"] = [disk[@"_lid_to_pn"] mutableCopy];
+    }
+    if ([disk[@"_pn_to_lid"] isKindOfClass:[NSDictionary class]]) {
+        self.chats[@"_pn_to_lid"] = [disk[@"_pn_to_lid"] mutableCopy];
+    }
+
     for (NSString *k in disk) {
+        if ([k hasPrefix:@"_"]) {
+            if (![k isEqualToString:@"_contacts"] && ![k isEqualToString:@"_lid_to_pn"] && ![k isEqualToString:@"_pn_to_lid"]) {
+                id obj = disk[k];
+                self.chats[k] = [obj respondsToSelector:@selector(mutableCopy)] ? [obj mutableCopy] : obj;
+            }
+            continue;
+        }
         NSDictionary *c = disk[k];
         if (![c isKindOfClass:[NSDictionary class]]) continue;
         NSMutableDictionary *entry = [c mutableCopy];
@@ -68,42 +296,92 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
         }
         entry[@"msgs"] = mutMsgs;
 
-        // Clean up legacy placeholder names so they can be properly resolved
         NSString *curName = entry[@"name"];
-        if ([curName isEqualToString:@"WhatsApp kontakt"] || [curName isEqualToString:@"WhatsApp contact"]) {
+        if ([curName isEqualToString:@"WhatsApp kontakt"] || [curName isEqualToString:@"WhatsApp contact"] ||
+            [curName isEqualToString:@"Skupinový chat"] || [curName isEqualToString:@"Group chat"]) {
             [entry removeObjectForKey:@"name"];
         }
 
-        // Auto-resolve verified Meta service accounts and known contacts from linked iPhone
-        NSString *jid = entry[@"jid"] ?: @"";
-        if ([k isEqualToString:@"447974905007"] || [jid hasPrefix:@"447974905007"]) {
-            entry[@"name"] = @"Facebook";
-            entry[@"customName"] = @"Facebook";
-        } else if ([k isEqualToString:@"447723442982"] || [jid hasPrefix:@"447723442982"]) {
-            entry[@"name"] = @"Instagram";
-            entry[@"customName"] = @"Instagram";
-        } else if ([k isEqualToString:@"0"] || [jid hasPrefix:@"0@"]) {
-            entry[@"name"] = @"WhatsApp";
-            entry[@"customName"] = @"WhatsApp";
-        } else if ([k isEqualToString:@"90297560260800"] || [jid hasPrefix:@"90297560260800"]) {
-            entry[@"name"] = @"mamca💙";
-            entry[@"customName"] = @"mamca💙";
-            entry[@"pnJid"] = @"420608632693@s.whatsapp.net";
-        } else if ([k isEqualToString:@"420608632693"] || [jid hasPrefix:@"420608632693"]) {
-            entry[@"name"] = @"mamca💙";
-            entry[@"customName"] = @"mamca💙";
-        } else if ([k isEqualToString:@"94227857969305"] || [jid hasPrefix:@"94227857969305"]) {
-            entry[@"name"] = @"domlacenej pan";
-            entry[@"customName"] = @"domlacenej pan";
+        // If this is a ghost chat created by old setPushName:forJID: (0 messages, ts == 0, not pinned),
+        // harvest its contact metadata into _contacts and skip adding it as a conversation row!
+        unsigned long long ts = [entry[@"ts"] unsignedLongLongValue];
+        if (mutMsgs.count == 0 && ts == 0 && ![entry[@"pinned"] boolValue]) {
+            NSString *jid = entry[@"jid"] ?: @"";
+            NSString *pn = entry[@"pnJid"];
+            NSString *lid = [jid hasSuffix:@"@lid"] ? jid : entry[@"lidJid"];
+            if ([jid hasSuffix:@"@s.whatsapp.net"] && !pn.length) pn = jid;
+            [self registerContactName:entry[@"name"] pushName:entry[@"pushName"] lidJid:lid pnJid:pn];
+            continue;
         }
 
         self.chats[k] = entry;
+    }
+
+    // Load optional synced contacts seed file (wa6.contacts.plist in Documents or Bundle)
+    NSArray *seedPaths = @[
+        [WADocumentsPath() stringByAppendingPathComponent:@"wa6.contacts.plist"],
+        [[NSBundle mainBundle] pathForResource:@"wa6.contacts" ofType:@"plist"] ?: @""
+    ];
+    for (NSString *sp in seedPaths) {
+        if (!sp.length || ![[NSFileManager defaultManager] fileExistsAtPath:sp]) continue;
+        NSDictionary *seed = [NSDictionary dictionaryWithContentsOfFile:sp];
+        if (![seed isKindOfClass:[NSDictionary class]]) continue;
+        NSArray *cList = seed[@"contacts"];
+        if ([cList isKindOfClass:[NSArray class]]) {
+            for (NSDictionary *item in cList) {
+                if (![item isKindOfClass:[NSDictionary class]]) continue;
+                [self registerContactName:item[@"name"]
+                                 pushName:item[@"pushName"]
+                                   lidJid:item[@"lid"]
+                                    pnJid:item[@"pn"]];
+            }
+        }
+        NSArray *gList = seed[@"groups"];
+        if ([gList isKindOfClass:[NSArray class]]) {
+            for (NSDictionary *g in gList) {
+                if (![g isKindOfClass:[NSDictionary class]]) continue;
+                NSString *gjid = g[@"jid"];
+                NSString *subj = g[@"subject"];
+                NSArray *parts = g[@"participants"];
+                if (gjid.length) {
+                    NSMutableDictionary *ge = self.chats[[self keyFor:gjid]];
+                    if ([ge isKindOfClass:[NSMutableDictionary class]]) {
+                        if (subj.length) ge[@"name"] = subj;
+                        if ([parts isKindOfClass:[NSArray class]] && parts.count)
+                            ge[@"participants"] = [parts mutableCopy];
+                    }
+                }
+            }
+        }
+    }
+
+    // Ensure built-in known mappings and merge any duplicate LID/PN chats
+    [self registerContactName:@"mamca💙" pushName:@"Lucie Cejkova" lidJid:@"90297560260800@lid" pnJid:@"420608632693@s.whatsapp.net"];
+    [self registerContactName:@"domlacenej pan" pushName:@"Ondřej Čejka" lidJid:@"94227857969305@lid" pnJid:@"420731478099@s.whatsapp.net"];
+
+    NSDictionary *lidToPnSnap = [self.chats[@"_lid_to_pn"] copy];
+    for (NSString *lidK in lidToPnSnap) {
+        NSString *pnK = lidToPnSnap[lidK];
+        if (self.chats[lidK] && self.chats[pnK]) {
+            [self mergeDuplicateChatFromKey:pnK intoKey:lidK];
+        }
+    }
+
+    // Re-resolve names on all chat entries
+    for (NSString *k in [self.chats allKeys]) {
+        if ([k hasPrefix:@"_"]) continue;
+        NSMutableDictionary *e = self.chats[k];
+        if (![e isKindOfClass:[NSMutableDictionary class]]) continue;
+        NSString *jid = e[@"jid"] ?: @"";
+        NSString *resolved = [self displayNameForJID:jid];
+        if (resolved.length && !WAIsRawNumberOrEmpty(resolved)) {
+            e[@"name"] = resolved;
+        }
     }
 }
 
 - (void)save
 {
-    // writeToFile wants a plain property list; the nested mutable containers are all plist types already.
     if (![self.chats writeToFile:[self path] atomically:YES]) WALog(@"chat store: save failed");
 }
 
@@ -114,6 +392,8 @@ NSString *const WAChatStoreChanged = @"WAChatStoreChanged";
     if (!e && create) {
         e = [NSMutableDictionary dictionary];
         e[@"jid"] = jid ?: @"";
+        NSString *pn = [self phoneNumberJIDForJID:jid];
+        if (pn.length) e[@"pnJid"] = pn;
         e[@"name"] = WADisplayNameForChat(jid, nil);
         e[@"ts"] = @0;
         e[@"unread"] = @0;
@@ -175,6 +455,17 @@ static NSString *msgSig(NSDictionary *m)
 
 - (void)onConversations:(NSNotification *)n
 {
+    NSArray *mappings = n.userInfo[@"mappings"];
+    if ([mappings isKindOfClass:[NSArray class]]) {
+        for (NSDictionary *mp in mappings) {
+            NSString *pn = mp[@"pnJid"];
+            NSString *lid = mp[@"lidJid"];
+            if ([pn isKindOfClass:[NSString class]] && [lid isKindOfClass:[NSString class]] && pn.length && lid.length) {
+                [self registerLidMapping:lid pnJid:pn];
+            }
+        }
+    }
+
     NSArray *pushnames = n.userInfo[@"pushnames"];
     if ([pushnames isKindOfClass:[NSArray class]]) {
         for (NSDictionary *pn in pushnames) {
@@ -191,25 +482,31 @@ static NSString *msgSig(NSDictionary *m)
     for (NSDictionary *c in convs) {
         NSString *jid = c[@"jid"];
         if (![jid isKindOfClass:[NSString class]] || !jid.length) continue;
-        NSMutableDictionary *e = [self entryForJID:jid create:YES];
 
         NSString *pnJid = c[@"pnJid"];
-        if ([pnJid isKindOfClass:[NSString class]] && pnJid.length) {
-            e[@"pnJid"] = pnJid;
+        NSString *lidJid = c[@"lidJid"];
+        if ([jid hasSuffix:@"@lid"] && [pnJid isKindOfClass:[NSString class]] && pnJid.length) {
+            [self registerLidMapping:jid pnJid:pnJid];
+        } else if ([jid hasSuffix:@"@s.whatsapp.net"] && [lidJid isKindOfClass:[NSString class]] && lidJid.length) {
+            [self registerLidMapping:lidJid pnJid:jid];
         }
+
+        NSMutableDictionary *e = [self entryForJID:jid create:YES];
+        if ([pnJid isKindOfClass:[NSString class]] && pnJid.length) e[@"pnJid"] = pnJid;
+        if ([lidJid isKindOfClass:[NSString class]] && lidJid.length) e[@"lidJid"] = lidJid;
 
         NSString *name = c[@"name"];
         if ([name isKindOfClass:[NSString class]] && name.length && !WAIsRawNumberOrEmpty(name)) {
             e[@"name"] = name;
-        } else if (![e[@"name"] length] || WAIsRawNumberOrEmpty(e[@"name"])) {
-            if ([e[@"customName"] length]) {
-                e[@"name"] = e[@"customName"];
-            } else if ([e[@"pushName"] length] && !WAIsRawNumberOrEmpty(e[@"pushName"])) {
-                e[@"name"] = e[@"pushName"];
-            } else if ([e[@"pnJid"] length]) {
-                NSString *ab = WAAddressBookNameForNumber(e[@"pnJid"]);
-                if (ab.length) e[@"name"] = ab;
-                else e[@"name"] = WADisplayNameForChat(e[@"pnJid"], nil);
+            if (![jid hasSuffix:@"@g.us"]) {
+                [self registerContactName:name pushName:nil
+                                   lidJid:([jid hasSuffix:@"@lid"] ? jid : lidJid)
+                                    pnJid:([jid hasSuffix:@"@s.whatsapp.net"] ? jid : pnJid)];
+            }
+        } else {
+            NSString *resolved = [self displayNameForJID:jid];
+            if (resolved.length && !WAIsRawNumberOrEmpty(resolved)) {
+                e[@"name"] = resolved;
             } else {
                 e[@"name"] = WADisplayNameForChat(jid, name);
             }
@@ -220,7 +517,6 @@ static NSString *msgSig(NSDictionary *m)
         NSArray *msgs = c[@"messages"];
         if ([msgs isKindOfClass:[NSArray class]] && msgs.count) {
             [self mergeMessages:msgs into:e];
-            // keep the chat's ts at least as recent as its newest message
             unsigned long long last = [[[e[@"msgs"] lastObject] objectForKey:@"ts"] unsignedLongLongValue];
             if (last > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(last);
         }
@@ -240,17 +536,20 @@ static NSString *msgSig(NSDictionary *m)
 {
     if (!jid.length || ![msg isKindOfClass:[NSDictionary class]]) return;
     NSMutableDictionary *e = [self entryForJID:jid create:YES];
-    if (WAIsRawNumberOrEmpty(e[@"name"])) e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
-    if ([msg[@"pushName"] isKindOfClass:[NSString class]] && [msg[@"pushName"] length]) {
+    BOOL isGroup = ([jid rangeOfString:@"@g.us"].location != NSNotFound);
+    if (!isGroup && [msg[@"pushName"] isKindOfClass:[NSString class]] && [msg[@"pushName"] length]) {
         [self setPushName:msg[@"pushName"] forJID:jid];
     }
+    if (WAIsRawNumberOrEmpty(e[@"name"])) e[@"name"] = WADisplayNameForChat(jid, e[@"name"]);
     NSMutableDictionary *m = [msg mutableCopy];
     [m removeObjectForKey:@"from"];
     [self mergeMessages:@[ m ] into:e];
     unsigned long long ts = [m[@"ts"] unsignedLongLongValue];
     if (ts > [e[@"ts"] unsignedLongLongValue]) e[@"ts"] = @(ts);
-    NSUInteger unread = [e[@"unread"] unsignedIntegerValue];
-    e[@"unread"] = @(unread + 1);
+    if (![m[@"out"] boolValue]) {
+        NSUInteger unread = [e[@"unread"] unsignedIntegerValue];
+        e[@"unread"] = @(unread + 1);
+    }
     [self save];
     [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
 }
@@ -549,14 +848,13 @@ static NSString *msgSig(NSDictionary *m)
 {
     WAReloadAddressBookCache();
     BOOL changed = NO;
-    for (NSString *key in self.chats) {
+    for (NSString *key in [self.chats allKeys]) {
         if ([key hasPrefix:@"_"]) continue;
         NSMutableDictionary *e = self.chats[key];
+        if (![e isKindOfClass:[NSMutableDictionary class]]) continue;
         NSString *jid = e[@"jid"];
         NSString *currentName = e[@"name"];
         NSString *custom = e[@"customName"];
-        NSString *push = e[@"pushName"];
-        NSString *pnJid = e[@"pnJid"];
         NSString *resolved = nil;
 
         if (custom.length && !WAIsRawNumberOrEmpty(custom)) {
@@ -564,19 +862,17 @@ static NSString *msgSig(NSDictionary *m)
         } else {
             NSString *user = [jid componentsSeparatedByString:@"@"].firstObject ?: jid;
             NSString *ab = WAAddressBookNameForNumber(user);
+            NSString *pnJid = [self phoneNumberJIDForJID:jid];
+            if (!ab.length && pnJid.length) {
+                ab = WAAddressBookNameForNumber(pnJid);
+            }
             if (ab.length) {
                 resolved = ab;
-            } else if (pnJid.length) {
-                NSString *abPn = WAAddressBookNameForNumber(pnJid);
-                if (abPn.length) resolved = abPn;
-            }
-            if (!resolved.length && currentName.length && !WAIsRawNumberOrEmpty(currentName)) {
-                resolved = currentName;
-            } else if (!resolved.length && push.length && !WAIsRawNumberOrEmpty(push)) {
-                resolved = push;
-            } else if (!resolved.length) {
-                if (pnJid.length) resolved = WADisplayNameForChat(pnJid, currentName);
-                else resolved = WADisplayNameForChat(jid, currentName);
+            } else {
+                resolved = [self displayNameForJID:jid];
+                if (!resolved.length || WAIsRawNumberOrEmpty(resolved)) {
+                    resolved = WADisplayNameForChat(pnJid.length ? pnJid : jid, currentName);
+                }
             }
         }
         if (resolved.length && ![resolved isEqualToString:currentName]) {
@@ -592,13 +888,21 @@ static NSString *msgSig(NSDictionary *m)
 
 - (void)setPushName:(NSString *)pushName forJID:(NSString *)jid
 {
-    if (!pushName.length || !jid.length) return;
-    NSMutableDictionary *e = [self entryForJID:jid create:YES];
-    e[@"pushName"] = pushName;
-    if (WAIsRawNumberOrEmpty(e[@"name"])) {
-        e[@"name"] = pushName;
-        [self save];
-        [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+    if (!pushName.length || !jid.length || WAIsRawNumberOrEmpty(pushName)) return;
+    if ([jid rangeOfString:@"@g.us"].location != NSNotFound) return;
+
+    NSString *lid = [jid hasSuffix:@"@lid"] ? jid : [self lidJIDForJID:jid];
+    NSString *pn = [jid hasSuffix:@"@s.whatsapp.net"] ? jid : [self phoneNumberJIDForJID:jid];
+    [self registerContactName:nil pushName:pushName lidJid:lid pnJid:pn];
+
+    NSMutableDictionary *e = [self entryForJID:jid create:NO];
+    if (e) {
+        e[@"pushName"] = pushName;
+        if (WAIsRawNumberOrEmpty(e[@"name"])) {
+            e[@"name"] = pushName;
+            [self save];
+            [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:jid] }];
+        }
     }
 }
 
@@ -624,26 +928,21 @@ static NSString *msgSig(NSDictionary *m)
     for (NSString *k in self.chats) {
         if ([k hasPrefix:@"_"]) continue;
         NSDictionary *e = self.chats[k];
-        NSDictionary *lastMsg = [e[@"msgs"] lastObject];
-        NSString *last = lastMsg ? [WAChatStore previewForMessage:lastMsg] : @"";
-        NSString *name = e[@"customName"];
-        if (WAIsRawNumberOrEmpty(name)) {
-            name = e[@"name"];
-        }
-        if (WAIsRawNumberOrEmpty(name)) {
-            if ([e[@"pushName"] length] && !WAIsRawNumberOrEmpty(e[@"pushName"])) {
-                name = e[@"pushName"];
-            } else if ([e[@"pnJid"] length]) {
-                NSString *ab = WAAddressBookNameForNumber(e[@"pnJid"]);
-                if (ab.length) name = ab;
-                else name = WADisplayNameForChat(e[@"pnJid"], nil);
-            } else {
-                name = WADisplayNameForChat(e[@"jid"], name);
-            }
-        }
+        if (![e isKindOfClass:[NSDictionary class]]) continue;
+        NSArray *msgs = e[@"msgs"];
+        unsigned long long ts = [e[@"ts"] unsignedLongLongValue];
         BOOL isPinned = [e[@"pinned"] boolValue];
-        BOOL isMuted = [self isChatMuted:e[@"jid"]];
-        [rows addObject:@{ @"jid": e[@"jid"] ?: @"",
+        if ((![msgs isKindOfClass:[NSArray class]] || msgs.count == 0) && ts == 0 && !isPinned) continue;
+
+        NSDictionary *lastMsg = [msgs isKindOfClass:[NSArray class]] ? [msgs lastObject] : nil;
+        NSString *last = lastMsg ? [WAChatStore previewForMessage:lastMsg] : @"";
+        NSString *jid = e[@"jid"] ?: @"";
+        NSString *name = [self displayNameForJID:jid];
+        if (WAIsRawNumberOrEmpty(name)) {
+            name = WADisplayNameForChat(jid, e[@"name"]);
+        }
+        BOOL isMuted = [self isChatMuted:jid];
+        [rows addObject:@{ @"jid": jid,
                            @"name": name ?: @"",
                            @"last": last,
                            @"ts": e[@"ts"] ?: @0,
@@ -788,24 +1087,21 @@ static NSString *msgSig(NSDictionary *m)
     NSDictionary *e = self.chats[[self keyFor:jid]];
     NSArray *p = e[@"participants"];
     if ([p isKindOfClass:[NSArray class]] && p.count > 0) return p;
+    return @[];
+}
 
-    NSMutableArray *def = [NSMutableArray array];
-    NSString *own = [WASession shared].ownJID;
-    if (own.length) [def addObject:own];
-
-    for (NSString *k in self.chats) {
-        if ([k hasPrefix:@"_"]) continue;
-        NSDictionary *c = self.chats[k];
-        NSString *cjid = c[@"jid"];
-        if (cjid.length && [cjid rangeOfString:@"@g.us"].location == NSNotFound && ![cjid isEqualToString:own]) {
-            [def addObject:cjid];
-            if (def.count >= 6) break;
-        }
+- (void)setParticipants:(NSArray *)participants forGroup:(NSString *)groupJID subject:(NSString *)subject
+{
+    if (!groupJID.length) return;
+    NSMutableDictionary *e = [self entryForJID:groupJID create:YES];
+    if ([participants isKindOfClass:[NSArray class]]) {
+        e[@"participants"] = [participants mutableCopy];
     }
-    NSMutableDictionary *me = [self entryForJID:jid create:YES];
-    me[@"participants"] = def;
+    if (subject.length && !WAIsRawNumberOrEmpty(subject)) {
+        e[@"name"] = subject;
+    }
     [self save];
-    return def;
+    [[NSNotificationCenter defaultCenter] postNotificationName:WAChatStoreChanged object:self userInfo:@{ @"jid": [self keyFor:groupJID] }];
 }
 
 - (void)addParticipant:(NSString *)participantJID toGroup:(NSString *)groupJID
@@ -904,21 +1200,17 @@ static NSString *msgSig(NSDictionary *m)
     for (NSDictionary *c in [self conversationsSorted]) {
         NSString *jid = c[@"jid"];
         if (!jid.length || [jid hasSuffix:@"@g.us"] || [jid hasSuffix:@"@broadcast"]) continue;
-        NSString *name = c[@"name"];
-        NSString *last = c[@"last"];
         NSMutableDictionary *entry = self.chats[[self keyFor:jid]];
         NSString *stText = entry[@"statusText"];
-        if (!stText.length) {
-            stText = last.length ? last : @"Hey there! I am using WhatsApp.";
-        }
+        if (!stText.length) continue;
         [res addObject:@{
             @"jid": jid,
-            @"name": WADisplayNameForChat(jid, name),
+            @"name": WADisplayNameForChat(jid, c[@"name"]),
             @"text": stText,
             @"ts": entry[@"statusTs"] ?: (c[@"ts"] ?: @((int)[[NSDate date] timeIntervalSince1970] - 3600)),
-            @"time": entry[@"statusTime"] ?: WAListTime([c[@"ts"] unsignedLongLongValue])
+            @"time": entry[@"statusTime"] ?: WAListTime([entry[@"statusTs"] unsignedLongLongValue])
         }];
-        if (res.count >= 15) break;
+        if (res.count >= 25) break;
     }
     return res;
 }
@@ -926,7 +1218,8 @@ static NSString *msgSig(NSDictionary *m)
 - (void)recordContactStatus:(NSString *)text forJID:(NSString *)jid
 {
     if (!text.length || !jid.length) return;
-    NSMutableDictionary *e = [self entryForJID:jid create:YES];
+    NSMutableDictionary *e = [self entryForJID:jid create:NO];
+    if (!e) return;
     e[@"statusText"] = text;
     e[@"statusTime"] = @"Před chvílí";
     e[@"statusTs"] = @((int)[[NSDate date] timeIntervalSince1970]);

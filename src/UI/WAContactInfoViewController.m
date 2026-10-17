@@ -54,6 +54,11 @@
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemEdit target:self action:@selector(editNameTapped)];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onStoreChanged:) name:WAChatStoreChanged object:nil];
+
+    if (self.isGroup) {
+        [[WASession shared] fetchGroupMetadata:self.jid];
+    }
+    [[WASession shared] fetchProfilePicture:self.jid];
 }
 
 - (void)reloadChatData
@@ -64,9 +69,22 @@
     }
 }
 
+- (NSString *)formattedSubtitle
+{
+    if (self.isGroup) {
+        return [NSString stringWithFormat:@"%lu %@", (unsigned long)self.participants.count, WALoc(@"participants")];
+    }
+    NSString *pnJid = [[WAChatStore shared] phoneNumberJIDForJID:self.jid] ?: self.jid;
+    return WAFormatPhoneNumber(pnJid);
+}
+
 - (void)onStoreChanged:(NSNotification *)n
 {
     [self reloadChatData];
+    self.name = WADisplayNameForChat(self.jid, nil);
+    self.nameLabel.text = self.name;
+    self.phoneLabel.text = [self formattedSubtitle];
+    self.avatarView.image = [WATheme avatarForName:self.name jid:self.jid diameter:84];
     [self.table reloadData];
 }
 
@@ -101,7 +119,7 @@
     self.phoneLabel.textAlignment = NSTextAlignmentCenter;
     self.phoneLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
     self.phoneLabel.backgroundColor = [UIColor clearColor];
-    self.phoneLabel.text = self.isGroup ? [NSString stringWithFormat:@"%lu %@", (unsigned long)self.participants.count, WALoc(@"participants")] : WAFormatPhoneNumber(self.jid);
+    self.phoneLabel.text = [self formattedSubtitle];
     [hdr addSubview:self.phoneLabel];
 
     self.table.tableHeaderView = hdr;
@@ -229,10 +247,11 @@
                 cell.selectionStyle = UITableViewCellSelectionStyleBlue;
             } else {
                 NSString *p = self.participants[indexPath.row - 1];
+                NSString *pnJid = [[WAChatStore shared] phoneNumberJIDForJID:p] ?: p;
                 cell.textLabel.text = WADisplayNameForChat(p, nil);
                 cell.textLabel.textColor = [UIColor blackColor];
                 cell.textLabel.textAlignment = NSTextAlignmentLeft;
-                cell.detailTextLabel.text = (indexPath.row == 1) ? WALoc(@"group_admin") : WAFormatPhoneNumber(p);
+                cell.detailTextLabel.text = (indexPath.row == 1) ? WALoc(@"group_admin") : ([pnJid hasSuffix:@"@lid"] ? @"" : WAFormatPhoneNumber(pnJid));
                 cell.imageView.image = [WATheme avatarForName:cell.textLabel.text jid:p diameter:36];
                 cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
                 cell.selectionStyle = UITableViewCellSelectionStyleBlue;

@@ -119,6 +119,16 @@
     return [img resizableImageWithCapInsets:UIEdgeInsetsMake(r, capL, r, capR)];
 }
 
+static void getRGBAComponents(UIColor *color, CGFloat *r, CGFloat *g, CGFloat *b, CGFloat *a)
+{
+    if (!color) { *r = 0; *g = 0; *b = 0; *a = 1; return; }
+    if (![color getRed:r green:g blue:b alpha:a]) {
+        CGFloat w = 0;
+        if ([color getWhite:&w alpha:a]) { *r = w; *g = w; *b = w; }
+        else { *r = 0.5; *g = 0.5; *b = 0.5; *a = 1; }
+    }
+}
+
 + (UIImage *)glossyButtonWithColor:(UIColor *)color
 {
     CGFloat w = 24, h = 32, r = 6;
@@ -126,7 +136,8 @@
     CGContextRef c = UIGraphicsGetCurrentContext();
     UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0.5, 0.5, w - 1, h - 1) cornerRadius:r];
     [p addClip];
-    const CGFloat *rgba = CGColorGetComponents(color.CGColor);
+    CGFloat rgba[4];
+    getRGBAComponents(color, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGFloat comps[8] = { MIN(rgba[0] + 0.12, 1), MIN(rgba[1] + 0.12, 1), MIN(rgba[2] + 0.12, 1), 1,
                          rgba[0] * 0.82, rgba[1] * 0.82, rgba[2] * 0.82, 1 };
@@ -146,11 +157,20 @@
 {
     if (jid.length) {
         NSString *key = [WAChatStore keyForJID:jid];
-        NSString *p1 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", key]];
-        UIImage *cached = [UIImage imageWithContentsOfFile:p1];
-        if (!cached) {
-            NSString *p2 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.png", key]];
+        NSString *pnJid = [[WAChatStore shared] phoneNumberJIDForJID:jid];
+        NSString *lidJid = [[WAChatStore shared] lidJIDForJID:jid];
+        NSString *pnKey = pnJid.length ? [[pnJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject : nil;
+        NSString *lidKey = lidJid.length ? [[lidJid componentsSeparatedByString:@"@"].firstObject componentsSeparatedByString:@":"].firstObject : nil;
+        NSArray *tryKeys = @[ key ?: @"", pnKey ?: @"", lidKey ?: @"" ];
+        UIImage *cached = nil;
+        for (NSString *tk in tryKeys) {
+            if (!tk.length) continue;
+            NSString *p1 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.jpg", tk]];
+            cached = [UIImage imageWithContentsOfFile:p1];
+            if (cached) break;
+            NSString *p2 = [WADocumentsPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"wa6_avatar_%@.png", tk]];
             cached = [UIImage imageWithContentsOfFile:p2];
+            if (cached) break;
         }
         if (cached && cached.size.width > 0 && cached.size.height > 0) {
             UIGraphicsBeginImageContextWithOptions(CGSizeMake(d, d), NO, 0);
@@ -264,7 +284,8 @@
     CGContextSaveGState(c);
     CGContextAddEllipseInRect(c, rc);
     CGContextClip(c);
-    const CGFloat *rgba = CGColorGetComponents(color.CGColor);
+    CGFloat rgba[4];
+    getRGBAComponents(color, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGFloat comps[8] = { MIN(rgba[0] + 0.15, 1), MIN(rgba[1] + 0.15, 1), MIN(rgba[2] + 0.15, 1), 1,
                          rgba[0] * 0.75, rgba[1] * 0.75, rgba[2] * 0.75, 1 };
@@ -305,7 +326,8 @@
     CGContextSaveGState(c);
     CGContextAddEllipseInRect(c, rc);
     CGContextClip(c);
-    const CGFloat *rgba = CGColorGetComponents(color.CGColor);
+    CGFloat rgba[4];
+    getRGBAComponents(color, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGFloat comps[8] = { MIN(rgba[0] + 0.15, 1), MIN(rgba[1] + 0.15, 1), MIN(rgba[2] + 0.15, 1), 1,
                          rgba[0] * 0.75, rgba[1] * 0.75, rgba[2] * 0.75, 1 };
