@@ -13,7 +13,15 @@
 + (void)styleNavigationBar:(UINavigationBar *)bar
 {
     if (!bar) return;
-    bar.tintColor = [self header];
+    if ([bar respondsToSelector:@selector(setBarTintColor:)]) {
+        bar.barTintColor = [self header];
+        bar.tintColor = [UIColor whiteColor];
+    } else {
+        bar.tintColor = [self header];
+    }
+    if ([bar respondsToSelector:@selector(setTranslucent:)]) {
+        bar.translucent = NO;
+    }
     bar.barStyle = UIBarStyleBlack;
     if ([bar respondsToSelector:@selector(setTitleTextAttributes:)]) {
         bar.titleTextAttributes = @{ UITextAttributeTextColor: [UIColor whiteColor] };
