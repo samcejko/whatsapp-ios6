@@ -17,6 +17,7 @@
 #include "wa_srtp.h"
 #include "wa_relay.h"
 #include "wa_user.h"
+#include "core/wa_fallback.h"
 
 NSString *const WASessionStateChanged = @"WASessionStateChanged";
 NSString *const WASessionQRChanged = @"WASessionQRChanged";
@@ -928,7 +929,7 @@ static void cb_device_changed(void *ctx, wa_device *d)
 {
     WALog(@"manual reconnect requested");
     if (_client) {
-        wa_client_reconnect(_client);
+        wa_client_connect(_client);
     }
 }
 

@@ -1,5 +1,6 @@
 #import "WARelayFallback.h"
 #import "WACommon.h"
+#include "core/wa_fallback.h"
 
 @interface WARelayFallback ()
 @property (nonatomic, strong) NSMutableArray *providers; // Array of NSDictionary

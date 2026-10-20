@@ -71,4 +71,8 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 // Request group metadata (subject & participants) via w:g2
 - (void)fetchGroupMetadata:(NSString *)groupJID;
 
+// Internal: heartbeat & fallback
+- (void)startHeartbeatMonitoring;
+- (void)tryFallbackConnections;
+
 @end
