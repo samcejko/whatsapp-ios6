@@ -4,6 +4,7 @@
 #import "../WASession.h"
 #import "../WAChatStore.h"
 #import "../WAAppDelegate.h"
+#import "../WADeviceStore.h"
 #import <AudioToolbox/AudioToolbox.h>
 
 @interface WASettingsViewController () <UIActionSheetDelegate>
