@@ -19,6 +19,7 @@ typedef struct {
     uint8_t call_key[32];
     int video;
     int active;
+    int is_incoming;      // 1 = incoming call, 0 = outgoing call (for correct relay endpoint selection)
     wa_relay_data relay;
     int has_relay;
     wa_srtp_keys send_keys;

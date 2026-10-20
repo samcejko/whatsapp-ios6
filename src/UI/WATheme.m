@@ -594,4 +594,148 @@ static void getRGBAComponents(UIColor *color, CGFloat *r, CGFloat *g, CGFloat *b
     return img;
 }
 
+// MARK: - Semantic Colors
+
++ (UIColor *)primaryActionColor {
+    return [UIColor colorWithRed:0.15 green:0.65 blue:0.30 alpha:1.0]; // #26D367-like
+}
+
++ (UIColor *)secondaryActionColor {
+    return [UIColor colorWithRed:0.03 green:0.37 blue:0.33 alpha:1.0]; // Teal
+}
+
++ (UIColor *)successColor {
+    return [UIColor colorWithRed:0.15 green:0.65 blue:0.30 alpha:1.0];
+}
+
++ (UIColor *)errorColor {
+    return [UIColor colorWithRed:0.85 green:0.20 blue:0.20 alpha:1.0];
+}
+
++ (UIColor *)warningColor {
+    return [UIColor colorWithRed:1.0 green:0.75 blue:0.10 alpha:1.0];
+}
+
++ (UIColor *)infoColor {
+    return [UIColor colorWithRed:0.20 green:0.50 blue:0.90 alpha:1.0];
+}
+
++ (UIColor *)messagePendingColor {
+    return [UIColor colorWithWhite:0.5 alpha:1.0];
+}
+
++ (UIColor *)messageSentColor {
+    return [UIColor colorWithWhite:0.6 alpha:1.0];
+}
+
++ (UIColor *)messageDeliveredColor {
+    return [UIColor colorWithRed:0.20 green:0.50 blue:0.90 alpha:1.0];
+}
+
++ (UIColor *)messageReadColor {
+    return [UIColor colorWithRed:0.20 green:0.50 blue:0.90 alpha:1.0];
+}
+
++ (UIColor *)chatBackgroundColor {
+    return [UIColor colorWithRed:0.93 green:0.90 blue:0.86 alpha:1.0]; // #ECE5DD-like
+}
+
++ (UIColor *)outgoingBubbleColor {
+    return [UIColor colorWithRed:0.86 green:0.97 blue:0.77 alpha:1.0]; // #DCF8C6-like
+}
+
++ (UIColor *)incomingBubbleColor {
+    return [UIColor whiteColor];
+}
+
++ (UIColor *)quotedMessageBarColor {
+    return [self primaryActionColor];
+}
+
+// MARK: - Layout Constants
+
++ (CGFloat)standardSpacing {
+    return 8.0;
+}
+
++ (CGFloat)compactSpacing {
+    return 4.0;
+}
+
++ (CGFloat)largeSpacing {
+    return 16.0;
+}
+
++ (CGFloat)bubbleCornerRadius {
+    return 8.0;
+}
+
++ (CGFloat)bubbleMaxWidthRatio {
+    return 0.75;
+}
+
++ (UIEdgeInsets)bubblePadding {
+    return UIEdgeInsetsMake(8, 8, 8, 8);
+}
+
++ (CGFloat)avatarSizeLarge {
+    return 64.0;
+}
+
++ (CGFloat)avatarSizeMedium {
+    return 44.0;
+}
+
++ (CGFloat)avatarSizeSmall {
+    return 32.0;
+}
+
+// MARK: - Typography
+
++ (UIFont *)headlineFont {
+    return [UIFont boldSystemFontOfSize:17];
+}
+
++ (UIFont *)bodyFont {
+    return [UIFont systemFontOfSize:16];
+}
+
++ (UIFont *)captionFont {
+    return [UIFont systemFontOfSize:13];
+}
+
++ (UIFont *)timestampFont {
+    return [UIFont systemFontOfSize:11];
+}
+
++ (UIFont *)messageBubbleFont {
+    return [UIFont systemFontOfSize:16];
+}
+
++ (UIFont *)messageTimestampFont {
+    return [UIFont systemFontOfSize:11];
+}
+
++ (UIFont *)messageNameFont {
+    return [UIFont boldSystemFontOfSize:14];
+}
+
+// MARK: - Animations
+
++ (NSTimeInterval)standardAnimationDuration {
+    return 0.25;
+}
+
++ (UIViewAnimationOptions)standardAnimationOptions {
+    return UIViewAnimationOptionCurveEaseInOut;
+}
+
++ (void)animateWithStandardTiming:(void (^)(void))animations completion:(void (^)(BOOL))completion {
+    [UIView animateWithDuration:[self standardAnimationDuration]
+                          delay:0
+                        options:[self standardAnimationOptions]
+                     animations:animations
+                     completion:completion];
+}
+
 @end

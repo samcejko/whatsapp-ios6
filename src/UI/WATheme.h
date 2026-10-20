@@ -45,3 +45,75 @@ typedef NS_ENUM(NSInteger, WACallButtonType) {
 // A small coloured unread-count pill (green), e.g. "3".
 + (UIImage *)badgeWithCount:(NSInteger)count;
 @end
+
+// Semantic Colors - WhatsApp-inspired but legally distinct
+@interface WATheme (SemanticColors)
+
+// Primary Actions
++ (UIColor *)primaryActionColor;      // Main action color (green)
++ (UIColor *)secondaryActionColor;    // Secondary action color
+
+// Status Colors
++ (UIColor *)successColor;            // Green for success/checkmarks
++ (UIColor *)errorColor;              // Red for errors
++ (UIColor *)warningColor;            // Yellow/Orange for warnings
++ (UIColor *)infoColor;               // Blue for info
+
+// Message Status Colors
++ (UIColor *)messagePendingColor;     // Gray for pending
++ (UIColor *)messageSentColor;        // Light gray for sent
++ (UIColor *)messageDeliveredColor;   // Blue for delivered
++ (UIColor *)messageReadColor;        // Blue for read (double check)
+
+// Chat Colors
++ (UIColor *)chatBackgroundColor;     // Chat background
++ (UIColor *)outgoingBubbleColor;     // Outgoing message bubble
++ (UIColor *)incomingBubbleColor;     // Incoming message bubble
++ (UIColor *)quotedMessageBarColor;   // Quoted message accent bar
+
+@end
+
+// Layout Constants - 8pt grid system
+@interface WATheme (Layout)
+
+// Spacing
++ (CGFloat)standardSpacing;           // 8pt
++ (CGFloat)compactSpacing;            // 4pt
++ (CGFloat)largeSpacing;              // 16pt
+
+// Bubble Styling
++ (CGFloat)bubbleCornerRadius;        // 8pt
++ (CGFloat)bubbleMaxWidthRatio;       // 0.75 (75% of screen width)
++ (UIEdgeInsets)bubblePadding;        // 8pt all sides
+
+// Avatar Sizes
++ (CGFloat)avatarSizeLarge;           // 64pt (profile)
++ (CGFloat)avatarSizeMedium;          // 44pt (chat list)
++ (CGFloat)avatarSizeSmall;           // 32pt (group participants)
+
+@end
+
+// Typography System
+@interface WATheme (Typography)
+
+// Text Styles
++ (UIFont *)headlineFont;             // Bold 17pt
++ (UIFont *)bodyFont;                 // Regular 16pt
++ (UIFont *)captionFont;              // Regular 13pt
++ (UIFont *)timestampFont;            // Regular 11pt
+
+// Message Fonts
++ (UIFont *)messageBubbleFont;        // Regular 16pt
++ (UIFont *)messageTimestampFont;     // Regular 11pt
++ (UIFont *)messageNameFont;          // Bold 14pt (groups)
+
+@end
+
+// Animation Helpers
+@interface WATheme (Animations)
+
++ (NSTimeInterval)standardAnimationDuration;
++ (UIViewAnimationOptions)standardAnimationOptions;
++ (void)animateWithStandardTiming:(void (^)(void))animations completion:(void (^)(BOOL))completion;
+
+@end

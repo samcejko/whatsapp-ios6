@@ -39,12 +39,14 @@
 {
     [super viewDidLoad];
     self.title = self.isGroup ? WALoc(@"group_info") : WALoc(@"contact_info");
-    self.view.backgroundColor = [UIColor colorWithWhite:0.94 alpha:1.0];
+    self.view.backgroundColor = [WATheme chatBackgroundColor];
 
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped];
     self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.table.dataSource = self;
     self.table.delegate = self;
+    self.table.backgroundColor = [UIColor clearColor];
+    self.table.separatorColor = [WATheme secondaryActionColor];
 
     [self reloadChatData];
     [self setupHeader];
@@ -115,9 +117,9 @@
 
     self.phoneLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 16 + avSize + 36, w - 40, 18)];
     self.phoneLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    self.phoneLabel.font = [UIFont systemFontOfSize:14];
+    self.phoneLabel.font = [WATheme captionFont];
     self.phoneLabel.textAlignment = NSTextAlignmentCenter;
-    self.phoneLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.phoneLabel.textColor = [WATheme secondaryActionColor];
     self.phoneLabel.backgroundColor = [UIColor clearColor];
     self.phoneLabel.text = [self formattedSubtitle];
     [hdr addSubview:self.phoneLabel];
@@ -205,7 +207,7 @@
         } else {
             NSUInteger starCount = [[WAChatStore shared] starredMessagesForJID:self.jid].count;
             cell.textLabel.text = WALoc(@"starred_messages");
-            cell.imageView.image = [WATheme starIconWithColor:[UIColor colorWithRed:0.95 green:0.75 blue:0.1 alpha:1.0] size:CGSizeMake(18, 18)];
+            cell.imageView.image = [WATheme starIconWithColor:[WATheme warningColor] size:CGSizeMake(18, 18)];
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)starCount];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             cell.accessoryType = UITableViewCellAccessoryNone;
@@ -259,22 +261,22 @@
         } else {
             BOOL isBlocked = [[WAChatStore shared] isContactBlocked:self.jid];
             cell.textLabel.text = isBlocked ? WALoc(@"unblock_contact") : WALoc(@"block_contact");
-            cell.textLabel.textColor = isBlocked ? [UIColor colorWithRed:0.2 green:0.5 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0];
+            cell.textLabel.textColor = isBlocked ? [WATheme successColor] : [WATheme errorColor];
             cell.textLabel.textAlignment = NSTextAlignmentCenter;
             cell.accessoryType = UITableViewCellAccessoryNone;
         }
     } else if (indexPath.section == 4) {
         if (self.isGroup && indexPath.row == 0) {
             cell.textLabel.text = WALoc(@"leave_group");
-            cell.textLabel.textColor = [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0];
+            cell.textLabel.textColor = [WATheme errorColor];
         } else {
             NSInteger idx = self.isGroup ? (indexPath.row - 1) : indexPath.row;
             if (idx == 0) {
                 cell.textLabel.text = WALoc(@"clear_chat");
-                cell.textLabel.textColor = [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0];
+                cell.textLabel.textColor = [WATheme errorColor];
             } else {
                 cell.textLabel.text = WALoc(@"delete_chat");
-                cell.textLabel.textColor = [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0];
+                cell.textLabel.textColor = [WATheme errorColor];
             }
         }
         cell.textLabel.textAlignment = NSTextAlignmentCenter;

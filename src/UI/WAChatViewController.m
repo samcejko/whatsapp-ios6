@@ -103,7 +103,7 @@
     BOOL isEphemeral = [[WAChatStore shared] ephemeralDurationForChat:self.jid] > 0;
     if (isEphemeral) {
         UIImageView *clock = [[UIImageView alloc] initWithFrame:CGRectMake(36, 8, 12, 12)];
-        clock.image = [WATheme clockIconWithColor:[UIColor colorWithWhite:0.95 alpha:1.0] size:CGSizeMake(12, 12)];
+        clock.image = [WATheme clockIconWithColor:[WATheme secondaryActionColor] size:CGSizeMake(12, 12)];
         [tv addSubview:clock];
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(52, 4, 154, 20)];
     } else {
@@ -117,8 +117,8 @@
     [tv addSubview:self.titleLabel];
 
     self.subtitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(36, 24, 170, 16)];
-    self.subtitleLabel.font = [UIFont systemFontOfSize:11];
-    self.subtitleLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1.0];
+    self.subtitleLabel.font = [WATheme timestampFont];
+    self.subtitleLabel.textColor = [WATheme secondaryActionColor];
     self.subtitleLabel.textAlignment = NSTextAlignmentLeft;
     self.subtitleLabel.backgroundColor = [UIColor clearColor];
     [tv addSubview:self.subtitleLabel];
@@ -143,7 +143,7 @@
 
     // Reply preview banner (above input bar)
     self.replyBar = [[UIView alloc] init];
-    self.replyBar.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
+    self.replyBar.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0]; // Keep for now - subtle background
     self.replyBar.hidden = YES;
 
     UIView *replyLine = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 4, 40)];
@@ -152,20 +152,20 @@
 
     self.replyAuthorLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 3, self.view.bounds.size.width - 50, 16)];
     self.replyAuthorLabel.font = [UIFont boldSystemFontOfSize:12];
-    self.replyAuthorLabel.textColor = [WATheme accent];
+    self.replyAuthorLabel.textColor = [WATheme primaryActionColor];
     self.replyAuthorLabel.backgroundColor = [UIColor clearColor];
     [self.replyBar addSubview:self.replyAuthorLabel];
 
     self.replyTextLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 20, self.view.bounds.size.width - 50, 16)];
-    self.replyTextLabel.font = [UIFont systemFontOfSize:12];
-    self.replyTextLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    self.replyTextLabel.font = [WATheme captionFont];
+    self.replyTextLabel.textColor = [WATheme secondaryActionColor];
     self.replyTextLabel.backgroundColor = [UIColor clearColor];
     [self.replyBar addSubview:self.replyTextLabel];
 
     self.replyCancelBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     [self.replyCancelBtn setTitle:@"✕" forState:UIControlStateNormal];
-    [self.replyCancelBtn setTitleColor:[UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
-    self.replyCancelBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+    [self.replyCancelBtn setTitleColor:[WATheme secondaryActionColor] forState:UIControlStateNormal];
+    self.replyCancelBtn.titleLabel.font = [WATheme headlineFont];
     [self.replyCancelBtn addTarget:self action:@selector(cancelReply) forControlEvents:UIControlEventTouchUpInside];
     [self.replyBar addSubview:self.replyCancelBtn];
 
@@ -173,13 +173,13 @@
 
     // Input bar
     self.bar = [[UIView alloc] init];
-    self.bar.backgroundColor = [UIColor colorWithWhite:0.93 alpha:1.0];
+    self.bar.backgroundColor = [UIColor colorWithWhite:0.93 alpha:1.0]; // Keep subtle input bar background
     [self.view addSubview:self.bar];
 
     self.attach = [UIButton buttonWithType:UIButtonTypeCustom];
     [self.attach setTitle:@"+" forState:UIControlStateNormal];
-    [self.attach setTitleColor:[UIColor colorWithWhite:0.35 alpha:1.0] forState:UIControlStateNormal];
-    self.attach.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+    [self.attach setTitleColor:[WATheme secondaryActionColor] forState:UIControlStateNormal];
+    self.attach.titleLabel.font = [WATheme headlineFont];
     [self.attach setBackgroundImage:[WATheme glossyButtonWithColor:[UIColor colorWithWhite:0.85 alpha:1.0]] forState:UIControlStateNormal];
     [self.attach addTarget:self action:@selector(attachTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.bar addSubview:self.attach];
@@ -250,6 +250,25 @@
 - (void)viewWillDisappear:(BOOL)animated
 {
     [super viewWillDisappear:animated];
+    
+    // If recording voice message, CANCEL it instead of auto-sending
+    if (self.isRecordingVoice && self.recorder && self.recorder.isRecording) {
+        WALog(@"canceling voice recording on view disappear");
+        [self.recorder stop];
+        self.recorder = nil;
+        [self.recordTimer invalidate];
+        self.recordTimer = nil;
+        self.isRecordingVoice = NO;
+        self.field.placeholder = WALoc(@"message_hint");
+        [[WASession shared] sendRecordingState:NO toJID:self.jid];
+        // Delete the recording file
+        if (self.recordFilePath.length) {
+            [[NSFileManager defaultManager] removeItemAtPath:self.recordFilePath error:nil];
+            self.recordFilePath = nil;
+        }
+        self.recordMsgId = nil;
+    }
+    
     [[WAAudioPlayer shared] stop];
     [[WASession shared] unsubscribePresence:self.jid];
     [[WASession shared] sendChatState:NO toJID:self.jid];
@@ -447,13 +466,13 @@
     NSString *state = n.userInfo[@"state"];
     if ([state isEqualToString:@"recording"]) {
         self.subtitleLabel.text = WALoc(@"recording_audio");
-        self.subtitleLabel.textColor = [WATheme accent];
+        self.subtitleLabel.textColor = [WATheme warningColor];
     } else if ([state isEqualToString:@"composing"]) {
         self.subtitleLabel.text = WALoc(@"typing");
-        self.subtitleLabel.textColor = [WATheme accent];
+        self.subtitleLabel.textColor = [WATheme infoColor];
     } else if ([state isEqualToString:@"available"]) {
         self.subtitleLabel.text = WALoc(@"online");
-        self.subtitleLabel.textColor = [UIColor colorWithWhite:0.92 alpha:1.0];
+        self.subtitleLabel.textColor = [WATheme successColor];
     } else {
         self.subtitleLabel.text = @"";
     }
@@ -794,7 +813,7 @@
 {
     NSString *display = ([m[@"kind"] intValue] == WA_MSG_AUDIO) ? [self displayTextFor:m] : m[@"display"];
     if (!display.length) return nil;
-    return WAParseMarkdownText(display, [UIFont systemFontOfSize:16], [UIColor colorWithWhite:0.1 alpha:1.0]);
+    return WAParseMarkdownText(display, [WATheme messageBubbleFont], [WATheme primaryActionColor]);
 }
 
 - (CGFloat)tableView:(UITableView *)t heightForRowAtIndexPath:(NSIndexPath *)ip
@@ -832,7 +851,7 @@
         chip.text = day;
         chip.font = df;
         chip.textAlignment = NSTextAlignmentCenter;
-        chip.textColor = [UIColor colorWithRed:0.2 green:0.35 blue:0.3 alpha:1.0];
+        chip.textColor = [WATheme secondaryActionColor];
         chip.backgroundColor = [UIColor colorWithRed:0.86 green:0.91 blue:0.84 alpha:0.95];
         chip.layer.cornerRadius = 11;
         chip.clipsToBounds = YES;
@@ -863,28 +882,28 @@
         switch (st) {
             case WAMessageStatusError:
                 statusGlyph = @" ⚠️";
-                statusColor = [UIColor colorWithRed:0.85 green:0.15 blue:0.15 alpha:1.0];
+                statusColor = [WATheme errorColor];
                 break;
             case WAMessageStatusPending:
                 statusGlyph = @" 🕓";
-                statusColor = [UIColor colorWithRed:0.35 green:0.55 blue:0.3 alpha:0.8];
+                statusColor = [WATheme messagePendingColor];
                 break;
             case WAMessageStatusSent:
                 statusGlyph = @" ✓";
-                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                statusColor = [WATheme messageSentColor];
                 break;
             case WAMessageStatusDelivered:
                 statusGlyph = @" ✓✓";
-                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                statusColor = [WATheme messageDeliveredColor];
                 break;
             case WAMessageStatusRead:
             case WAMessageStatusPlayed:
                 statusGlyph = @" ✓✓";
-                statusColor = [UIColor colorWithRed:0.20 green:0.60 blue:0.86 alpha:1.0];
+                statusColor = [WATheme messageReadColor];
                 break;
             default:
                 statusGlyph = @" ✓✓";
-                statusColor = [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0];
+                statusColor = [WATheme messageDeliveredColor];
                 break;
         }
     }
@@ -922,7 +941,7 @@
         NSDictionary *q = m[@"quoted"];
         CGFloat qw = bw - 24;
         UIView *qbox = [[UIView alloc] initWithFrame:CGRectMake(bf.origin.x + 12, y, qw, 34)];
-        qbox.backgroundColor = [UIColor colorWithWhite:0 alpha:0.06];
+        qbox.backgroundColor = [WATheme quotedMessageBarColor];
         qbox.layer.cornerRadius = 4;
         qbox.clipsToBounds = YES;
 
@@ -938,8 +957,8 @@
         [qbox addSubview:qAuthor];
 
         UILabel *qText = [[UILabel alloc] initWithFrame:CGRectMake(8, 16, qw - 12, 16)];
-        qText.font = [UIFont systemFontOfSize:11];
-        qText.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+        qText.font = [WATheme captionFont];
+        qText.textColor = [WATheme secondaryActionColor];
         qText.backgroundColor = [UIColor clearColor];
         qText.text = q[@"text"] ?: @"";
         [qbox addSubview:qText];
@@ -979,18 +998,18 @@
     CGFloat curX = bf.origin.x + bw - 12 - bottomRowW;
     if (isStarred) {
         UILabel *starLbl = [[UILabel alloc] initWithFrame:CGRectMake(curX, bf.origin.y + bh - 16, starW + 1, 13)];
-        starLbl.font = timeFont;
+        starLbl.font = [WATheme messageTimestampFont];
         starLbl.backgroundColor = [UIColor clearColor];
-        starLbl.textColor = [UIColor colorWithRed:0.95 green:0.75 blue:0.1 alpha:1.0];
+        starLbl.textColor = [WATheme warningColor];
         starLbl.text = starGlyph;
         [cell.contentView addSubview:starLbl];
         curX += starW;
     }
     if (timeStr.length) {
         UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(curX, bf.origin.y + bh - 16, timeW + 1, 13)];
-        tl.font = timeFont;
+        tl.font = [WATheme messageTimestampFont];
         tl.backgroundColor = [UIColor clearColor];
-        tl.textColor = out ? [UIColor colorWithRed:0.25 green:0.5 blue:0.2 alpha:1.0] : [UIColor colorWithWhite:0.55 alpha:1.0];
+        tl.textColor = out ? [WATheme messageDeliveredColor] : [WATheme secondaryActionColor];
         tl.text = timeStr;
         [cell.contentView addSubview:tl];
         curX += timeW;
@@ -1014,7 +1033,7 @@
         rxLbl.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.95];
         rxLbl.layer.cornerRadius = 9;
         rxLbl.layer.borderWidth = 1.0;
-        rxLbl.layer.borderColor = [UIColor colorWithWhite:0.85 alpha:1.0].CGColor;
+        rxLbl.layer.borderColor = [WATheme secondaryActionColor].CGColor;
         rxLbl.clipsToBounds = YES;
         rxLbl.frame = CGRectMake(out ? (bf.origin.x + 8) : (bf.origin.x + bw - 32), bf.origin.y + bh - 10, 26, 20);
         [cell.contentView addSubview:rxLbl];

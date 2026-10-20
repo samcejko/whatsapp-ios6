@@ -30,21 +30,21 @@
         _nameLbl = [[UILabel alloc] init];
         _nameLbl.font = [UIFont boldSystemFontOfSize:17];
         _lastLbl = [[UILabel alloc] init];
-        _lastLbl.font = [UIFont systemFontOfSize:14];
-        _lastLbl.textColor = [UIColor colorWithWhite:0.52 alpha:1.0];
+        _lastLbl.font = [WATheme captionFont];
+        _lastLbl.textColor = [WATheme secondaryActionColor];
         _timeLbl = [[UILabel alloc] init];
-        _timeLbl.font = [UIFont systemFontOfSize:12];
-        _timeLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+        _timeLbl.font = [WATheme timestampFont];
+        _timeLbl.textColor = [WATheme secondaryActionColor];
         _timeLbl.textAlignment = NSTextAlignmentRight;
         _badge = [[UIImageView alloc] init];
 
         _pinView = [[UIImageView alloc] init];
-        _pinView.image = [WATheme pinIconWithColor:[UIColor colorWithRed:0.78 green:0.25 blue:0.2 alpha:1.0] size:CGSizeMake(14, 14)];
+        _pinView.image = [WATheme pinIconWithColor:[WATheme warningColor] size:CGSizeMake(14, 14)];
         _pinView.contentMode = UIViewContentModeCenter;
         _pinView.hidden = YES;
 
         _muteView = [[UIImageView alloc] init];
-        _muteView.image = [WATheme muteIconWithColor:[UIColor colorWithWhite:0.55 alpha:1.0] size:CGSizeMake(15, 14)];
+        _muteView.image = [WATheme muteIconWithColor:[WATheme secondaryActionColor] size:CGSizeMake(15, 14)];
         _muteView.contentMode = UIViewContentModeCenter;
         _muteView.hidden = YES;
 
@@ -118,7 +118,7 @@
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.rowHeight = 70;
-    self.table.separatorColor = [UIColor colorWithWhite:0.86 alpha:1.0];
+    self.table.separatorColor = [WATheme secondaryActionColor];
     [self.table addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onTableLongPress:)]];
 
     self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
@@ -138,8 +138,8 @@
     self.empty = [[UILabel alloc] init];
     self.empty.numberOfLines = 0;
     self.empty.textAlignment = NSTextAlignmentCenter;
-    self.empty.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    self.empty.font = [UIFont systemFontOfSize:15];
+    self.empty.textColor = [WATheme secondaryActionColor];
+    self.empty.font = [WATheme bodyFont];
     self.empty.text = WALoc(@"no_chats");
     [self.view addSubview:self.empty];
 
@@ -236,10 +236,10 @@
 - (void)refreshBanner:(WASessionState)s
 {
     NSString *t = WALoc(@"status_offline");
-    UIColor *col = [UIColor colorWithWhite:0.5 alpha:1.0];
+    UIColor *col = [WATheme secondaryActionColor];
     if (s == WASessionStateConnecting) t = WALoc(@"status_connecting");
     else if (s == WASessionStateHandshaking) t = WALoc(@"status_handshaking");
-    else if (s == WASessionStateConnected) { t = WALoc(@"status_connected"); col = [WATheme accent]; }
+    else if (s == WASessionStateConnected) { t = WALoc(@"status_connected"); col = [WATheme successColor]; }
     else if (s == WASessionStatePairing) t = WALoc(@"status_pairing");
     self.banner.text = t;
     self.banner.backgroundColor = col;
@@ -602,7 +602,7 @@
         if (ip.section == 0) {
             NSDictionary *ms = [[WAChatStore shared] myStatus];
             cell.textLabel.text = WALoc(@"status_my");
-            cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+            cell.textLabel.font = [WATheme headlineFont];
             if (ms) {
                 cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", ms[@"time"] ?: @"", ms[@"text"] ?: @""];
                 UIImage *img = [[WAChatStore shared] myStatusImage];
@@ -611,16 +611,18 @@
                 cell.detailTextLabel.text = WALoc(@"status_add");
                 cell.imageView.image = [WATheme avatarForName:WALoc(@"you") jid:@"my_status" diameter:44];
             }
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+            cell.detailTextLabel.textColor = [WATheme secondaryActionColor];
+            cell.detailTextLabel.font = [WATheme captionFont];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             cell.accessoryView = nil;
         } else {
             NSDictionary *item = (ip.row < self.statusItems.count) ? self.statusItems[ip.row] : nil;
             NSString *sname = item[@"name"] ?: @"";
             cell.textLabel.text = sname;
-            cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+            cell.textLabel.font = [WATheme headlineFont];
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", item[@"time"] ?: @"", item[@"text"] ?: @""];
-            cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+            cell.detailTextLabel.textColor = [WATheme secondaryActionColor];
+            cell.detailTextLabel.font = [WATheme captionFont];
             cell.imageView.image = [WATheme avatarForName:sname jid:item[@"jid"] diameter:44];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             cell.accessoryView = nil;
@@ -641,7 +643,7 @@
         NSDictionary *log = self.callLogs[ip.row];
         NSString *cname = log[@"name"] ?: WADisplayNameForChat(log[@"jid"], nil);
         cell.textLabel.text = cname;
-        cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
+        cell.textLabel.font = [WATheme headlineFont];
         cell.imageView.image = [WATheme avatarForName:cname jid:log[@"jid"] diameter:44];
 
         BOOL missed = [log[@"missed"] boolValue];
@@ -651,7 +653,8 @@
                                         [NSString stringWithFormat:@"↗ %@", WALoc(@"outgoing_call_item")]);
         NSString *tstr = WAListTime([log[@"ts"] unsignedLongLongValue]);
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@", dirText, tstr];
-        cell.detailTextLabel.textColor = missed ? [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithWhite:0.5 alpha:1.0];
+        cell.detailTextLabel.textColor = missed ? [WATheme errorColor] : [WATheme secondaryActionColor];
+        cell.detailTextLabel.font = [WATheme captionFont];
 
         UIButton *btn = (UIButton *)cell.accessoryView;
         btn.tag = ip.row;

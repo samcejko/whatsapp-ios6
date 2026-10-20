@@ -16,19 +16,19 @@
 {
     [super viewDidLoad];
     self.title = WALoc(@"pair_title");
-    self.view.backgroundColor = [UIColor colorWithRed:0.93 green:0.93 blue:0.90 alpha:1.0];
+    self.view.backgroundColor = [WATheme chatBackgroundColor];
 
     UILabel *intro = [[UILabel alloc] init];
     intro.numberOfLines = 0;
     intro.textAlignment = NSTextAlignmentCenter;
-    intro.font = [UIFont systemFontOfSize:15];
-    intro.textColor = [UIColor colorWithWhite:0.25 alpha:1.0];
+    intro.font = [WATheme bodyFont];
+    intro.textColor = [WATheme secondaryActionColor];
     intro.backgroundColor = [UIColor clearColor];
     intro.text = WALoc(@"pair_instructions");
     [self.view addSubview:intro];
 
     self.qr = [[WAQRView alloc] init];
-    self.qr.layer.borderColor = [UIColor colorWithWhite:0.8 alpha:1.0].CGColor;
+    self.qr.layer.borderColor = [WATheme secondaryActionColor].CGColor;
     self.qr.layer.borderWidth = 1;
     [self.view addSubview:self.qr];
 
@@ -37,8 +37,8 @@
 
     self.status = [[UILabel alloc] init];
     self.status.textAlignment = NSTextAlignmentCenter;
-    self.status.font = [UIFont systemFontOfSize:14];
-    self.status.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    self.status.font = [WATheme captionFont];
+    self.status.textColor = [WATheme secondaryActionColor];
     self.status.backgroundColor = [UIColor clearColor];
     self.status.text = WALoc(@"pair_generating");
     [self.view addSubview:self.status];

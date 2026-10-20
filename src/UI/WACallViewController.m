@@ -63,8 +63,8 @@
 
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.textAlignment = NSTextAlignmentCenter;
-    self.statusLabel.font = [UIFont systemFontOfSize:16];
-    self.statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    self.statusLabel.font = [WATheme bodyFont];
+    self.statusLabel.textColor = [UIColor whiteColor];
     self.statusLabel.backgroundColor = [UIColor clearColor];
     self.statusLabel.text = self.incoming ? (self.video ? WALoc(@"call_incoming_video") : WALoc(@"call_incoming"))
                                           : WALoc(@"call_outgoing");
@@ -72,11 +72,11 @@
 
     self.buttons = [NSMutableArray array];
     if (self.incoming) {
-        [self addButton:WALoc(@"call_decline") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
-        [self addButton:WALoc(@"call_accept") color:[WATheme accent] glyph:@"✓" action:@selector(accept)];
+        [self addButton:WALoc(@"call_decline") color:[WATheme errorColor] glyph:@"✕" action:@selector(hangup)];
+        [self addButton:WALoc(@"call_accept") color:[WATheme successColor] glyph:@"✓" action:@selector(accept)];
     } else {
         [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
-        [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
+        [self addButton:WALoc(@"call_end") color:[WATheme errorColor] glyph:@"✕" action:@selector(hangup)];
         [self addButton:(self.video ? WALoc(@"call_camera") : WALoc(@"call_speaker")) color:[UIColor colorWithWhite:1 alpha:0.2] glyph:(self.video ? @"▶" : @"◉") action:(self.video ? @selector(noop) : @selector(toggleSpeaker))];
     }
 
@@ -90,7 +90,7 @@
 {
     CAGradientLayer *g = [CAGradientLayer layer];
     g.frame = self.view.bounds;
-    UIColor *top = [UIColor colorWithRed:0.10 green:0.30 blue:0.28 alpha:1.0];
+    UIColor *top = [WATheme primaryActionColor];
     UIColor *bot = [UIColor colorWithRed:0.02 green:0.12 blue:0.11 alpha:1.0];
     g.colors = @[ (id)top.CGColor, (id)bot.CGColor ];
     [self.view.layer insertSublayer:g atIndex:0];
@@ -104,7 +104,7 @@
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     UILabel *cap = [[UILabel alloc] init];
     cap.text = title;
-    cap.font = [UIFont systemFontOfSize:12];
+    cap.font = [WATheme captionFont];
     cap.textColor = [UIColor colorWithWhite:1 alpha:0.75];
     cap.textAlignment = NSTextAlignmentCenter;
     cap.backgroundColor = [UIColor clearColor];
@@ -197,7 +197,7 @@
     [self.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)];
     [self.buttons removeAllObjects];
     [self addButton:WALoc(@"call_mute") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"M" action:@selector(toggleMute)];
-    [self addButton:WALoc(@"call_end") color:[UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1] glyph:@"✕" action:@selector(hangup)];
+    [self addButton:WALoc(@"call_end") color:[WATheme errorColor] glyph:@"✕" action:@selector(hangup)];
     [self addButton:WALoc(@"call_speaker") color:[UIColor colorWithWhite:1 alpha:0.2] glyph:@"◉" action:@selector(toggleSpeaker)];
     [self viewDidLayoutSubviews];
     [self connect];

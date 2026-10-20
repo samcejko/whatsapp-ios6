@@ -32,10 +32,12 @@ typedef NS_ENUM(NSInteger, WASessionState) {
 @property (nonatomic, readonly, copy) NSString *qrString;   // current pairing QR, or nil
 @property (nonatomic, readonly) BOOL registered;            // paired to an account
 @property (nonatomic, readonly, copy) NSString *ownJID;
+@property (nonatomic, readonly) BOOL syncing;               // Currently syncing messages (for UI indicator)
 
 - (void)start;
 - (void)stop;
-- (void)unlinkAndReset;   // forget the device identity (local only) and re-pair
+- (void)reconnect;         // Manually reconnect (for sync button)
+- (void)unlinkAndReset;    // forget the device identity (local only) and re-pair
 
 // Send a 1:1 text to a bare user JID ("<num>@s.whatsapp.net"). Runs on the client thread.
 - (void)sendText:(NSString *)text toJID:(NSString *)jid;

@@ -33,6 +33,7 @@ int wa_callengine_place(wa_client *c, wa_sess_store *sessions, const char *to_us
     wa_call_new_id(st->call_id, sizeof st->call_id);
     snprintf(st->peer, sizeof st->peer, "%s", to_user_jid);
     st->video = video;
+    st->is_incoming = 0;  // outgoing call
 
     wa_device_list devs;
     memset(&devs, 0, sizeof devs);
@@ -99,6 +100,7 @@ int wa_callengine_on_offer(wa_client *c, wa_sess_store *sessions, const wa_node 
     if (in.call_creator) snprintf(st->peer, sizeof st->peer, "%s", in.call_creator);
     else if (in.from) snprintf(st->peer, sizeof st->peer, "%s", in.from);
     st->video = in.video;
+    st->is_incoming = 1;  // incoming call
 
     wa_device *d = wa_client_device(c);
 

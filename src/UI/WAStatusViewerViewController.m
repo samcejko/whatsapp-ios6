@@ -53,7 +53,7 @@
             cap.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             cap.backgroundColor = [UIColor clearColor];
             cap.textColor = [UIColor whiteColor];
-            cap.font = [UIFont systemFontOfSize:16];
+            cap.font = [WATheme bodyFont];
             cap.numberOfLines = 2;
             cap.textAlignment = NSTextAlignmentCenter;
             cap.text = self.statusText;
@@ -66,7 +66,7 @@
         card.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         CAGradientLayer *grad = [CAGradientLayer layer];
         grad.frame = self.view.bounds;
-        grad.colors = @[ (id)[UIColor colorWithRed:0.1 green:0.45 blue:0.4 alpha:1.0].CGColor,
+        grad.colors = @[ (id)[WATheme primaryActionColor].CGColor,
                          (id)[UIColor colorWithRed:0.05 green:0.25 blue:0.3 alpha:1.0].CGColor ];
         [card.layer addSublayer:grad];
         [self.view addSubview:card];
@@ -75,7 +75,7 @@
         lbl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
         lbl.backgroundColor = [UIColor clearColor];
         lbl.textColor = [UIColor whiteColor];
-        lbl.font = [UIFont boldSystemFontOfSize:26];
+        lbl.font = [WATheme headlineFont];
         lbl.numberOfLines = 0;
         lbl.textAlignment = NSTextAlignmentCenter;
         lbl.shadowColor = [UIColor colorWithWhite:0 alpha:0.6];

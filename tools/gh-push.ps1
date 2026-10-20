@@ -55,9 +55,13 @@ function Invoke-GH {
 
 function Test-Ignored([string]$rel) {
     $r = $rel -replace '\\', '/'
-    if ($r -like '.theos/*' -or $r -like 'obj/*' -or $r -like 'packages/*' -or $r -like 'vendor/mbedtls/*' -or $r -like 'vendor/opus/*' -or $r -like 'vendor/qrcodegen/*' -or $r -like '.git/*' -or $r -like '.chrome*') { return $true }
+    if ($r -like '.theos/*' -or $r -like 'obj/*' -or $r -like 'packages/*' -or $r -like 'vendor/mbedtls/*' -or $r -like 'vendor/opus/*' -or $r -like 'vendor/qrcodegen/*' -or $r -like '.git/*' -or $r -like '.chrome*' -or $r -like 'real/*') { return $true }
     if ($r -like 'Resources/Icon*.png' -or $r -like 'Resources/Default*.png' -or $r -like 'Resources/LaunchLogo*.png' -or $r -eq 'Resources/cacert.pem' -or $r -like 'Resources/licenses/*') { return $true }
     if ($r -like '*.ipa' -or $r -like '*.deb' -or $r -like '*.DS_Store' -or $r -like '*.log' -or $r -like 'tools/*.plist' -or $r -like '*.bak') { return $true }
+    # Ignore documentation and plan files
+    if ($r -like 'plans/*' -or $r -like 'analysis/*.md' -or $r -like 'tools/*.txt' -or $r -like '*.md' -or $r -like '*.txt') { return $true }
+    # But allow root README.md
+    if ($r -eq 'README.md') { return $false }
     # Local settings with the token, wherever they are; .env files of any name never leave the machine either
     $name = ($r -split '/')[-1]
     if ($name -eq 'local.json' -or $name -eq '.env' -or $name -like '*.env' -or $name -like '.env.*') { return $true }

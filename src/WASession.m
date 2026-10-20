@@ -1,6 +1,8 @@
 #import "WASession.h"
 #import "WACommon.h"
 #import "WAChatStore.h"
+#import "WARelayFallback.h"
+#import "WADeviceStore.h"
 
 #import <AudioToolbox/AudioToolbox.h>
 #include "wa_store.h"
@@ -14,6 +16,7 @@
 #include "wa_wstun.h"
 #include "wa_srtp.h"
 #include "wa_relay.h"
+#include "wa_user.h"
 
 NSString *const WASessionStateChanged = @"WASessionStateChanged";
 NSString *const WASessionQRChanged = @"WASessionQRChanged";
@@ -45,6 +48,9 @@ NSString *const WASessionCallAudioPacket = @"WASessionCallAudioPacket";
 @property (nonatomic, copy) NSString *qrString;
 @property (nonatomic, copy) NSString *ownJID;
 @property (nonatomic) BOOL running;
+@property (nonatomic) BOOL syncing;
+@property (nonatomic, strong) NSTimer *heartbeatTimer;
+@property (nonatomic) NSTimeInterval lastMessageTime;
 @end
 
 static NSString *storePath(void) { return [WADocumentsPath() stringByAppendingPathComponent:@"wa6.store"]; }
@@ -80,7 +86,12 @@ static void cb_connected(void *ctx)
     WASession *self = (__bridge WASession *)ctx;
     dispatch_async(dispatch_get_main_queue(), ^{
         self.state = WASessionStateConnected;
+        self.lastMessageTime = [NSDate timeIntervalSinceReferenceDate];
         [[NSNotificationCenter defaultCenter] postNotificationName:WASessionStateChanged object:self userInfo:@{ @"state": @(WASessionStateConnected) }];
+        
+        // Start heartbeat monitoring to detect connection loss
+        [self startHeartbeatMonitoring];
+        
         // Automatically query group metadata for any group chats and own profile picture
         if (self.ownJID.length) [self fetchProfilePicture:self.ownJID];
         for (NSDictionary *c in [[WAChatStore shared] conversationsSorted]) {
@@ -98,8 +109,14 @@ static void rtc_on_open(void *ctx)
     WALog(@"call: WebRTC data channel opened, sending STUN ALLOCATE & ping");
     if (!self->_rtc || !self->_currentCall.has_relay) return;
 
-    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, 1);
-    if (!ep) return;
+    // Use the correct direction for endpoint selection
+    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, self->_currentCall.is_incoming);
+    if (!ep) {
+        WALog(@"call: ERROR - no relay endpoint found for %s call", self->_currentCall.is_incoming ? "incoming" : "outgoing");
+        return;
+    }
+    WALog(@"call: selected relay endpoint %s:%u (FNA=%d) for %s call",
+          ep->ipv4, ep->port, ep->is_fna, self->_currentCall.is_incoming ? "incoming" : "outgoing");
 
     int tok_idx = (ep->token_id >= 0 && ep->token_id < self->_currentCall.relay.ntokens) ? ep->token_id : 0;
     const uint8_t *tok = self->_currentCall.relay.tokens[tok_idx];
@@ -188,15 +205,27 @@ static void start_call_media(WASession *self)
 {
     if (!self->_hasCurrentCall || self->_rtc || !self->_currentCall.has_relay) return;
 
-    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, 1);
+    // Use the correct direction for endpoint selection (incoming=1 prefers FNA, outgoing=0 avoids FNA)
+    const wa_relay_endpoint *ep = wa_relay_pick_endpoint(&self->_currentCall.relay, self->_currentCall.is_incoming);
     if (!ep || !ep->ipv4[0]) {
-        WALog(@"call: no suitable relay endpoint found");
+        WALog(@"call: ERROR - no suitable relay endpoint found for %s call",
+              self->_currentCall.is_incoming ? "incoming" : "outgoing");
         return;
     }
 
+    WALog(@"call: selected relay %s:%u (relay_name=%s, FNA=%d, token_id=%d) for %s call",
+          ep->ipv4, ep->port, ep->relay_name, ep->is_fna, ep->token_id,
+          self->_currentCall.is_incoming ? "incoming" : "outgoing");
+
+    // Setup SRTP with consistent LID identifiers for both parties
     const char *our_lid = self->_dev.lid[0] ? self->_dev.lid : self->_dev.pn;
-    const char *peer_jid = self->_currentCall.peer;
-    wa_callengine_setup_srtp(&self->_currentCall, our_lid, peer_jid);
+    const char *peer_lid = self->_currentCall.peer;  // Already contains the correct LID from offer/place
+    
+    WALog(@"call: setting up SRTP (our_lid=%s, peer_lid=%s)",
+          our_lid && our_lid[0] ? (strstr(our_lid, "@") ? "***@..." : our_lid) : "none",
+          peer_lid && peer_lid[0] ? (strstr(peer_lid, "@") ? "***@..." : peer_lid) : "none");
+    
+    wa_callengine_setup_srtp(&self->_currentCall, our_lid, peer_lid);
 
     WALog(@"call: connecting media transport to %s:%u", ep->ipv4, ep->port);
     wa_rtc_callbacks cb;
@@ -232,7 +261,67 @@ static void send_ack(WASession *self, const wa_node *node, const char *cls)
 static void cb_node(void *ctx, const wa_node *node)
 {
     WASession *self = (__bridge WASession *)ctx;
-
+    
+    // Update last message time for heartbeat monitoring
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.lastMessageTime = [NSDate timeIntervalSinceReferenceDate];
+    });
+    
+    // Handle device list updates from WhatsApp (usync device-list)
+    if (wa_node_tag_is(node, "iq")) {
+        const char *type = wa_node_get(node, "type");
+        if (type && strcmp(type, "result") == 0) {
+            wa_node *devlist = wa_node_find(node, "device-list");
+            if (devlist) {
+                // Parse device list and update WADeviceStore
+                wa_device_list dlist = {0};
+                if (wa_user_parse_devices(node, &dlist) == 0) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        WADeviceStore *store = [WADeviceStore shared];
+                        for (int i = 0; i < dlist.ndevices; i++) {
+                            const char *device_jid = dlist.jids[i];
+                            if (device_jid && device_jid[0]) {
+                                // Extract device ID from JID (format: user:dev@server)
+                                char device_id[80] = {0};
+                                const char *colon = strchr(device_jid, ':');
+                                const char *at = strchr(device_jid, '@');
+                                if (colon && at && at > colon) {
+                                    size_t len = at - colon - 1;
+                                    if (len < sizeof(device_id)) {
+                                        memcpy(device_id, colon + 1, len);
+                                        device_id[len] = '\0';
+                                    }
+                                } else {
+                                    strncpy(device_id, device_jid, sizeof(device_id) - 1);
+                                }
+                                
+                                // Determine platform from device JID
+                                WADevicePlatform platform = WADevicePlatformUnknown;
+                                if (strstr(device_jid, "web") || strstr(device_jid, "desktop")) {
+                                    platform = WADevicePlatformWeb;
+                                } else if (strstr(device_jid, "android")) {
+                                    platform = WADevicePlatformAndroid;
+                                } else if (strstr(device_jid, "ios") || strstr(device_jid, "iphone")) {
+                                    platform = WADevicePlatformiOS;
+                                } else if (strstr(device_jid, "mac")) {
+                                    platform = WADevicePlatformMacOS;
+                                } else if (strstr(device_jid, "windows")) {
+                                    platform = WADevicePlatformWindows;
+                                }
+                                
+                                NSString *name = [NSString stringWithFormat:@"Device %s", device_id];
+                                [store addDevice:[NSString stringWithUTF8String:device_id]
+                                            name:name
+                                        platform:platform
+                                   encryptionKey:nil];
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+    
     if (wa_node_tag_is(node, "message")) {
         const char *notify = wa_node_get(node, "notify");
         const char *raw_from = wa_node_get(node, "from");
@@ -702,6 +791,11 @@ static void cb_disconnect(void *ctx, const char *reason, int reconnect)
         if (!reconnect) {
             self.state = WASessionStateDisconnected;
             [[NSNotificationCenter defaultCenter] postNotificationName:WASessionStateChanged object:self userInfo:@{ @"state": @(WASessionStateDisconnected), @"detail": r }];
+            
+            // Try fallback connections after a brief delay
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self tryFallbackConnections];
+            });
         }
     });
 }
@@ -762,12 +856,107 @@ static void cb_device_changed(void *ctx, wa_device *d)
     _cb.on_disconnect = cb_disconnect;
     _cb.on_device_changed = cb_device_changed;
     memset(&_cfg, 0, sizeof _cfg);          // defaults: web.whatsapp.com, Noise authenticates WA
+    
+    // Load fallback providers from TSV
+    [self loadFallbackProviders];
+    
     _client = wa_client_new(&_dev, &_cb, &_cfg);
     self.running = YES;
     self.state = WASessionStateConnecting;
+    self.lastMessageTime = [NSDate timeIntervalSinceReferenceDate];
     _thread = [[NSThread alloc] initWithTarget:self selector:@selector(run) object:nil];
     _thread.name = @"wa6-client";
     [_thread start];
+}
+
+- (void)loadFallbackProviders
+{
+    NSString *tsvPath = [[NSBundle mainBundle] pathForResource:@"domain_fronting_providers"
+                                                           ofType:@"tsv"
+                                                      inDirectory:@"config"];
+    if (!tsvPath) {
+        WALog(@"Fallback TSV not found in bundle");
+        return;
+    }
+    
+    // Use C parser to load providers
+    wa_fallback_list list = {0};
+    int count = wa_fallback_load([tsvPath UTF8String], &list);
+    if (count <= 0) {
+        WALog(@"Failed to load fallback providers");
+        return;
+    }
+    
+    // Store in config (need to keep the list alive)
+    // For simplicity, we'll allocate and copy
+    _cfg.fallback_count = count;
+    _cfg.fallback_providers = malloc(count * sizeof(wa_fallback_provider));
+    if (_cfg.fallback_providers) {
+        memcpy((void *)_cfg.fallback_providers, list.providers, count * sizeof(wa_fallback_provider));
+        WALog(@"Loaded %d fallback providers into client config", count);
+    }
+}
+
+- (void)startHeartbeatMonitoring
+{
+    [self.heartbeatTimer invalidate];
+    self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:30.0
+                                                           target:self
+                                                         selector:@selector(checkConnectionHealth)
+                                                         userInfo:nil
+                                                          repeats:YES];
+    WALog(@"heartbeat monitoring started");
+}
+
+- (void)checkConnectionHealth
+{
+    if (!self.running || self.state != WASessionStateConnected) {
+        return;
+    }
+    
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    NSTimeInterval timeSinceLastMessage = now - self.lastMessageTime;
+    
+    // If we haven't received any messages (including keepalives) for 2 minutes, connection might be dead
+    if (timeSinceLastMessage > 120.0) {
+        WALog(@"connection appears dead (no messages for %.0f seconds), attempting reconnect", timeSinceLastMessage);
+        [self reconnect];
+    }
+}
+
+- (void)reconnect
+{
+    WALog(@"manual reconnect requested");
+    if (_client) {
+        wa_client_reconnect(_client);
+    }
+}
+
+- (void)tryFallbackConnections
+{
+    WALog(@"Primary connection failed, trying fallback providers...");
+    
+    WARelayFallback *fallback = [WARelayFallback sharedInstance];
+    if (!fallback.providerNames.count) {
+        [fallback loadConfiguration];
+    }
+    
+    NSArray *providers = [fallback providerNames];
+    for (NSInteger i = 0; i < providers.count; i++) {
+        WALog(@"Trying fallback provider: %@", providers[i]);
+        
+        NSError *error = nil;
+        if ([fallback tryFallbackConnectionAtIndex:i error:&error]) {
+            WALog(@"✓ Connected via fallback: %@", providers[i]);
+            return;
+        }
+        
+        if (error) {
+            WALog(@"✗ Fallback %@ failed: %@", providers[i], error.localizedDescription);
+        }
+    }
+    
+    WALog(@"All fallback providers exhausted");
 }
 
 - (void)run
@@ -780,6 +969,8 @@ static void cb_device_changed(void *ctx, wa_device *d)
 
 - (void)stop
 {
+    [self.heartbeatTimer invalidate];
+    self.heartbeatTimer = nil;
     if (_client) wa_client_stop(_client);
     self.running = NO;
 }
@@ -877,8 +1068,12 @@ static void action_accept_call(wa_client *c, void *ctx)
     WASession *self = (__bridge WASession *)ctx;
     if (self->_hasCurrentCall) {
         wa_callengine_accept(c, &self->_currentCall);
-        if (self->_currentCall.has_relay) {
+        // If we already have relay data and no active RTC connection, start media transport now
+        if (self->_currentCall.has_relay && !self->_rtc) {
+            WALog(@"call: accept - starting media transport (relay already available)");
             start_call_media(self);
+        } else if (!self->_currentCall.has_relay) {
+            WALog(@"call: accept - relay data not yet received, will start media when it arrives");
         }
     }
 }
@@ -1406,6 +1601,13 @@ static void action_fetch_group_metadata(wa_client *c, void *ctx)
     if (wa_client_post(_client, action_fetch_group_metadata, p) != 0) free(p);
 }
 
-- (void)dealloc { if (_sessions) free(_sessions); }
+- (void)dealloc {
+    if (_sessions) free(_sessions);
+    if (_cfg.fallback_providers) {
+        free((void *)_cfg.fallback_providers);
+        _cfg.fallback_providers = NULL;
+        _cfg.fallback_count = 0;
+    }
+}
 
 @end

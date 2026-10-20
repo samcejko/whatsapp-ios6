@@ -33,7 +33,7 @@
 {
     [super viewDidLoad];
     self.title = WALoc(@"media_shared");
-    self.view.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
+    self.view.backgroundColor = [WATheme chatBackgroundColor];
 
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:WALoc(@"ok") style:UIBarButtonItemStyleDone target:self action:@selector(close)];
@@ -45,8 +45,8 @@
     self.emptyLabel = [[UILabel alloc] init];
     self.emptyLabel.text = WALoc(@"media_shared");
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
-    self.emptyLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    self.emptyLabel.font = [UIFont systemFontOfSize:16];
+    self.emptyLabel.textColor = [WATheme secondaryActionColor];
+    self.emptyLabel.font = [WATheme bodyFont];
     self.emptyLabel.hidden = (self.mediaMessages.count > 0);
     [self.view addSubview:self.emptyLabel];
 

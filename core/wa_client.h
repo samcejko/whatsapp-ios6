@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include "wa_store.h"
 #include "wa_node.h"
+#include "wa_fallback.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,10 @@ typedef struct {
     const char *origin;        // default "https://web.whatsapp.com"
     const char *ca_file;       // PEM bundle, or NULL to skip TLS verification (Noise still authenticates WA)
     int verify_tls;            // when ca_file is set
+    
+    // Fallback providers for domain fronting
+    const wa_fallback_provider *fallback_providers;
+    int fallback_count;
 } wa_client_config;
 
 wa_client *wa_client_new(wa_device *device, const wa_client_callbacks *cb, const wa_client_config *cfg);

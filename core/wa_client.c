@@ -106,6 +106,7 @@ void wa_client_free(wa_client *c)
 #ifndef _WIN32
     if (c->lock_ready) pthread_mutex_destroy(&c->lock);
 #endif
+    // Note: fallback_providers is owned by the caller (WASession), not freed here
     free(c);
 }
 
@@ -555,31 +556,156 @@ static int process_frames(wa_client *c)
 
 // -------------------------------------------------------------------------------------------------- lifecycle
 
-int wa_client_connect(wa_client *c)
+// Try to connect using a specific host/path/origin (for fallback)
+static int wa_client_connect_to(wa_client *c, const char *host, int port, const char *path, const char *origin)
 {
     c->state = WA_CONNECTING;
     c->reconnect_wanted = 0;
     c->prekeys_sent = 0;
     wa_buf_clear(&c->inbuf);
     char err[192];
-    c->ws = wa_ws_open(c->cfg.host, 443, c->cfg.path, c->cfg.origin,
+    c->ws = wa_ws_open(host, port, path, origin,
                        c->cfg.verify_tls ? c->cfg.ca_file : NULL, 15000, err, sizeof err);
     if (!c->ws) {
         set_err(c, "%s", err);
         c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->dev->registered ? 1 : 0);
         return -1;
     }
     if (do_handshake(c) != 0) {
         wa_ws_close(c->ws);
         c->ws = NULL;
         c->state = WA_DISCONNECTED;
-        if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->dev->registered ? 1 : 0);
         return -1;
     }
     c->last_send_us = wa_now_us();
     c->last_recv_us = c->last_send_us;
     return 0;
+}
+
+// Parse URL template and extract host, path, query
+// Template format: https://host/path?query={PATH}&{QS}
+// Returns 1 on success, 0 on failure
+static int parse_fallback_url(const char *url_template, char *host, size_t host_cap, char *path, size_t path_cap, char *query, size_t query_cap)
+{
+    if (!url_template || !host || !path || !query) return 0;
+    
+    // Skip protocol (https://)
+    const char *p = url_template;
+    if (strncmp(p, "https://", 8) == 0) p += 8;
+    else if (strncmp(p, "http://", 7) == 0) p += 7;
+    
+    // Extract host (until / or ? or end)
+    const char *host_end = p;
+    while (*host_end && *host_end != '/' && *host_end != '?') host_end++;
+    size_t host_len = host_end - p;
+    if (host_len >= host_cap) host_len = host_cap - 1;
+    memcpy(host, p, host_len);
+    host[host_len] = '\0';
+    
+    // Extract path and query
+    p = host_end;
+    if (*p == '/') {
+        const char *path_end = p;
+        while (*path_end && *path_end != '?') path_end++;
+        size_t path_len = path_end - p;
+        if (path_len >= path_cap) path_len = path_cap - 1;
+        memcpy(path, p, path_len);
+        path[path_len] = '\0';
+        p = path_end;
+    } else {
+        path[0] = '\0';
+    }
+    
+    if (*p == '?') {
+        p++; // skip ?
+        size_t query_len = strlen(p);
+        if (query_len >= query_cap) query_len = query_cap - 1;
+        memcpy(query, p, query_len);
+        query[query_len] = '\0';
+    } else {
+        query[0] = '\0';
+    }
+    
+    return 1;
+}
+
+// Replace placeholders in path and query
+static void replace_placeholders(char *str, size_t cap, const char *path, const char *qs)
+{
+    if (!str) return;
+    char buf[512];
+    char *dst = buf;
+    const char *src = str;
+    size_t remaining = cap - 1;
+    
+    while (*src && remaining > 0) {
+        if (strncmp(src, "{PATH}", 6) == 0 && path) {
+            size_t len = strlen(path);
+            if (len > remaining) len = remaining;
+            memcpy(dst, path, len);
+            dst += len;
+            remaining -= len;
+            src += 6;
+        } else if (strncmp(src, "{QS}", 4) == 0 && qs) {
+            size_t len = strlen(qs);
+            if (len > remaining) len = remaining;
+            memcpy(dst, qs, len);
+            dst += len;
+            remaining -= len;
+            src += 4;
+        } else {
+            *dst++ = *src++;
+            remaining--;
+        }
+    }
+    *dst = '\0';
+    strncpy(str, buf, cap - 1);
+    str[cap - 1] = '\0';
+}
+
+int wa_client_connect(wa_client *c)
+{
+    // First try primary connection
+    int rc = wa_client_connect_to(c, c->cfg.host, 443, c->cfg.path, c->cfg.origin);
+    if (rc == 0) return 0;
+    
+    // Primary failed - try fallback providers
+    if (c->cfg.fallback_providers && c->cfg.fallback_count > 0) {
+        for (int i = 0; i < c->cfg.fallback_count; i++) {
+            const wa_fallback_provider *fb = &c->cfg.fallback_providers[i];
+            
+            // Parse the URL template to extract host, path, query
+            char fb_host[256], fb_path[256], fb_query[512];
+            if (!parse_fallback_url(fb->url_template, fb_host, sizeof(fb_host), fb_path, sizeof(fb_path), fb_query, sizeof(fb_query))) {
+                printf("[wa_client] Failed to parse fallback URL: %s\n", fb->url_template);
+                continue;
+            }
+            
+            // Replace placeholders with actual path and query
+            replace_placeholders(fb_path, sizeof(fb_path), c->cfg.path, "");
+            replace_placeholders(fb_query, sizeof(fb_query), "", c->cfg.path); // QS typically empty for initial connect
+            
+            // Build full path with query
+            char full_path[512];
+            if (fb_query[0]) {
+                snprintf(full_path, sizeof(full_path), "%s?%s", fb_path, fb_query);
+            } else {
+                snprintf(full_path, sizeof(full_path), "%s", fb_path);
+            }
+            
+            printf("[wa_client] Trying fallback provider: %s (%s%s)\n", fb->provider_name, fb_host, full_path);
+            
+            rc = wa_client_connect_to(c, fb_host, 443, full_path, fb_host);
+            if (rc == 0) {
+                printf("[wa_client] Connected via fallback: %s\n", fb->provider_name);
+                return 0;
+            }
+        }
+    }
+    
+    // All failed - notify disconnect
+    if (c->cb.on_disconnect) c->cb.on_disconnect(c->cb.ctx, c->error, c->dev->registered ? 1 : 0);
+    return -1;
 }
 
 static void send_keepalive(wa_client *c)

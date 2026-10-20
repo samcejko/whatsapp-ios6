@@ -20,12 +20,14 @@
 {
     [super viewDidLoad];
     self.title = WALoc(@"settings");
-    self.view.backgroundColor = [UIColor colorWithWhite:0.94 alpha:1.0];
+    self.view.backgroundColor = [WATheme chatBackgroundColor];
 
     _table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped];
     _table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _table.dataSource = self;
     _table.delegate = self;
+    _table.backgroundColor = [UIColor clearColor];
+    _table.separatorColor = [WATheme secondaryActionColor];
 
     // profile header: avatar + own number
     NSString *jid = [WASession shared].ownJID ?: @"";
@@ -45,13 +47,13 @@
     self.profileAvatarView.image = [WATheme avatarForName:WALoc(@"app_name") jid:(bareJid.length ? bareJid : @"wazzup") diameter:64];
     [hdr addSubview:self.profileAvatarView];
     UILabel *nl = [[UILabel alloc] initWithFrame:CGRectMake(96, 36, w - 110, 26)];
-    nl.font = [UIFont boldSystemFontOfSize:21];
+    nl.font = [WATheme headlineFont];
     nl.text = num.length ? [@"+" stringByAppendingString:num] : WALoc(@"profile");
     nl.backgroundColor = [UIColor clearColor];
     [hdr addSubview:nl];
     self.statusSub = [[UILabel alloc] initWithFrame:CGRectMake(96, 64, w - 110, 20)];
-    self.statusSub.font = [UIFont systemFontOfSize:14];
-    self.statusSub.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.statusSub.font = [WATheme captionFont];
+    self.statusSub.textColor = [WATheme secondaryActionColor];
     self.statusSub.backgroundColor = [UIColor clearColor];
     [hdr addSubview:self.statusSub];
     _table.tableHeaderView = hdr;
@@ -81,15 +83,18 @@
     else if (s == WASessionStateConnected) t = WALoc(@"status_connected");
     else if (s == WASessionStatePairing) t = WALoc(@"status_pairing");
     self.statusSub.text = t;
+    self.statusSub.textColor = (s == WASessionStateConnected) ? [WATheme successColor] : [WATheme secondaryActionColor];
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 3; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 5; }
 
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s
 {
     if (s == 0) return 5; // Refresh contacts, Wallpaper, Notification sound, Blocked contacts, Clear all chats
     if (s == 1) return 2; // Encryption, Audio Codec
     if (s == 2) return 1; // Unlink
+    if (s == 3) return 1; // Linked Devices
+    if (s == 4) return 1; // About
     return 0;
 }
 
@@ -98,6 +103,8 @@
     if (s == 0) return WALoc(@"chat_settings");
     if (s == 1) return WALoc(@"connection_security");
     if (s == 2) return WALoc(@"profile");
+    if (s == 3) return WALoc(@"linked_devices");
+    if (s == 4) return WALoc(@"about");
     return nil;
 }
 
@@ -107,6 +114,11 @@
         return [NSString stringWithFormat:@"Wazzup %@\n%@",
                 [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.1.0",
                 @"Not affiliated with WhatsApp / Meta."];
+    }
+    if (s == 3) {
+        return [NSString stringWithFormat:@"Wazzup %@\n%@",
+                [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.1.0",
+                @"Neoficiální WhatsApp klient. Není spojeno s WhatsApp Inc. nebo Meta.\nWhatsApp® je registrovaná značka WhatsApp LLC."];
     }
     return nil;
 }
@@ -153,7 +165,7 @@
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
             cell.textLabel.text = WALoc(@"clear_all_chats");
-            cell.textLabel.textColor = [UIColor colorWithRed:0.85 green:0.2 blue:0.2 alpha:1.0];
+            cell.textLabel.textColor = [WATheme errorColor];
             cell.textLabel.textAlignment = NSTextAlignmentCenter;
             cell.accessoryType = UITableViewCellAccessoryNone;
         }
@@ -169,9 +181,20 @@
         }
     } else if (ip.section == 2) {
         cell.textLabel.text = WALoc(@"unlink");
-        cell.textLabel.textColor = [UIColor colorWithRed:0.85 green:0.1 blue:0.1 alpha:1.0];
+        cell.textLabel.textColor = [WATheme errorColor];
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
         cell.accessoryType = UITableViewCellAccessoryNone;
+    } else if (ip.section == 3) {
+        // Linked Devices - show count
+        NSArray *devices = [[WADeviceStore shared] pairedDevices];
+        cell.textLabel.text = WALoc(@"linked_devices");
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu %@", (unsigned long)devices.count, devices.count == 1 ? WALoc(@"device") : WALoc(@"devices")];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (ip.section == 4) {
+        cell.textLabel.text = WALoc(@"about");
+        cell.textLabel.textColor = [WATheme accent];
+        cell.textLabel.textAlignment = NSTextAlignmentCenter;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
 }
@@ -254,6 +277,11 @@
                                                    delegate:self cancelButtonTitle:WALoc(@"cancel") otherButtonTitles:WALoc(@"unlink"), nil];
         a.tag = 502;
         [a show];
+    } else if (ip.section == 3) {
+        // Linked Devices - push to device list view controller
+        [self showLinkedDevices];
+    } else if (ip.section == 4) {
+        [self showAbout];
     }
 }
 
@@ -292,6 +320,73 @@
         WAAppDelegate *ad = (WAAppDelegate *)[UIApplication sharedApplication].delegate;
         [ad showPairing];
     }
+}
+
+- (void)showLinkedDevices
+{
+    NSArray *devices = [[WADeviceStore shared] pairedDevices];
+    
+    if (devices.count == 0) {
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:WALoc(@"linked_devices")
+                                                        message:WALoc(@"no_linked_devices")
+                                                       delegate:nil
+                                              cancelButtonTitle:WALoc(@"ok")
+                                              otherButtonTitles:nil];
+        [alert show];
+        return;
+    }
+    
+    UIActionSheet *as = [[UIActionSheet alloc] initWithTitle:WALoc(@"linked_devices")
+                                                    delegate:self
+                                           cancelButtonTitle:WALoc(@"cancel")
+                                      destructiveButtonTitle:nil
+                                           otherButtonTitles:nil];
+    
+    for (NSDictionary *device in devices) {
+        NSString *name = device[@"name"];
+        NSString *platform = [[WADeviceStore shared] platformNameForPlatform:[device[@"platform"] integerValue]];
+        NSString *lastSeen = [self formatLastSeen:device[@"lastSeen"]];
+        [as addButtonWithTitle:[NSString stringWithFormat:@"%@ (%@) - %@", name, platform, lastSeen]];
+    }
+    
+    [as addButtonWithTitle:WALoc(@"cancel")];
+    as.cancelButtonIndex = devices.count;
+    as.tag = 600;
+    
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        // Would need a cell reference for iPad
+        [as showInView:self.view];
+    } else {
+        [as showInView:self.view];
+    }
+}
+
+- (NSString *)formatLastSeen:(NSNumber *)timestamp {
+    if (!timestamp) return WALoc(@"never");
+    NSTimeInterval ts = [timestamp doubleValue];
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    NSTimeInterval diff = now - ts;
+    
+    if (diff < 60) return WALoc(@"just_now");
+    if (diff < 3600) return [NSString stringWithFormat:WALoc(@"minutes_ago"), (int)(diff / 60)];
+    if (diff < 86400) return [NSString stringWithFormat:WALoc(@"hours_ago"), (int)(diff / 3600)];
+    if (diff < 604800) return [NSString stringWithFormat:WALoc(@"days_ago"), (int)(diff / 86400)];
+    return WALoc(@"long_time_ago");
+}
+
+- (void)showAbout
+{
+    NSString *msg = @"Wazzup - neoficiální WhatsApp klient\n\n"
+                    @"Není spojeno s WhatsApp Inc. nebo Meta.\n\n"
+                    @"WhatsApp® je registrovaná značka WhatsApp LLC.\n\n"
+                    @"Vyvinuto pro interoperabilitu s WhatsApp protokolem.";
+    
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"O aplikaci"
+                                                    message:msg
+                                                   delegate:nil
+                                          cancelButtonTitle:@"OK"
+                                          otherButtonTitles:nil];
+    [alert show];
 }
 
 - (void)dealloc
